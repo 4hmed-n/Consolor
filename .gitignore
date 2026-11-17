@@ -1,9 +1,24 @@
+# Build artifacts
 build/
 dist/
+*.exe
 *.spec
-console-backup.reg
+*.log
+
+# Registry backups
+*.reg
+
+# Python
 __pycache__/
-# no extra docs, only the root README
+*.pyc
+*.pyo
+
+# Kiro specs
+.kiro/
+
+# Only keep README.md, ignore all other markdown files
 *.md
 !/README.md
+
+# Build scripts
 build.bat
