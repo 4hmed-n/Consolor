@@ -22,3 +22,8 @@ __pycache__/
 
 # Build scripts
 build.bat
+# old Rust version
+*.rs
+Cargo.toml
+Cargo.lock
+target/
