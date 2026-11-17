@@ -448,6 +448,42 @@ class BlurHandler:
         except AttributeError:
             self.SetWindowCompositionAttribute = None
     
+    def parse_tint_color(self, color_input):
+        """Parse tint color from hex or color name."""
+        # Color name mapping
+        color_names = {
+            'red': '#FF0000',
+            'blue': '#0000FF',
+            'green': '#00FF00',
+            'purple': '#800080',
+            'pink': '#FFC0CB',
+            'orange': '#FFA500',
+            'cyan': '#00FFFF',
+            'yellow': '#FFFF00',
+            'teal': '#008080',
+            'white': '#FFFFFF',
+            'black': '#000000'
+        }
+        
+        # Check if it's a color name
+        if color_input.lower() in color_names:
+            return color_names[color_input.lower()]
+        
+        # Otherwise treat as hex
+        if not color_input.startswith('#'):
+            color_input = '#' + color_input
+        
+        # Validate hex format
+        if len(color_input) != 7:
+            raise ValueError(f"Invalid color format: {color_input}")
+        
+        try:
+            int(color_input[1:], 16)
+        except ValueError:
+            raise ValueError(f"Invalid hex color: {color_input}")
+        
+        return color_input
+    
     def apply_acrylic_blur(self, tint_color_hex, tint_opacity_percent):
         """
         Apply Fluent acrylic blur with theme-based tint color.
@@ -539,7 +575,7 @@ class BackupManager:
         """Check if a backup exists."""
         return self.backup_file.exists()
     
-    def save_state_before_apply(self, theme_name, opacity=None, blur=False):
+    def save_state_before_apply(self, theme_name, opacity=None, blur=False, tint=None):
         """Save the state we're ABOUT TO APPLY (so undo can revert to it)."""
         try:
             # Load existing history
@@ -554,6 +590,7 @@ class BackupManager:
                 'theme': theme_name,
                 'opacity': opacity,
                 'blur': blur,
+                'tint': tint,
                 'timestamp': time.time()
             }
             history.append(entry)
@@ -856,6 +893,16 @@ def cmd_apply(args):
                 print(f"  - {t.name}", file=sys.stderr)
             sys.exit(1)
     
+    # Parse tint color if specified
+    tint_color = None
+    if args.tint:
+        try:
+            blur_handler = BlurHandler()
+            tint_color = blur_handler.parse_tint_color(args.tint)
+        except ValueError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+    
     # Handle --glass preset
     opacity = args.opacity
     blur = args.blur
@@ -865,17 +912,22 @@ def cmd_apply(args):
         if opacity is None:
             opacity = 70
     
+    # --tint implies --blur
+    if tint_color:
+        blur = True
+    
     # Determine if we should reset effects or keep them
-    # Reset to solid (100%, no blur) unless:
-    # 1. User specified --opacity, --blur, or --glass
+    # Reset to solid (100%, no blur, no tint) unless:
+    # 1. User specified --opacity, --blur, --glass, or --tint
     # 2. User specified --keep-effects
-    user_specified_effects = args.opacity is not None or args.blur or args.glass
+    user_specified_effects = args.opacity is not None or args.blur or args.glass or args.tint
     keep_effects = args.keep_effects
     
     if not user_specified_effects and not keep_effects:
-        # Reset to solid (100% opacity, no blur)
+        # Reset to solid (100% opacity, no blur, no tint)
         opacity = 100
         blur = False
+        tint_color = None
     
     # Create backup
     backup_manager = BackupManager()
@@ -904,11 +956,13 @@ def cmd_apply(args):
                 print(f"  Opacity: {opacity}%")
             if blur:
                 print(f"  Blur: Enabled (acrylic)")
+            if tint_color:
+                print(f"  Note: Custom tint ({tint_color}) only applies to legacy CMD blur")
             print()
             print("Restart Windows Terminal or open a new tab to see the changes.")
             
             # Save to history AFTER successful apply
-            backup_manager.save_state_before_apply(theme.name, opacity, blur)
+            backup_manager.save_state_before_apply(theme.name, opacity, blur, tint_color)
         except Exception as e:
             print(f"ERROR: Failed to configure Windows Terminal: {e}", file=sys.stderr)
             sys.exit(1)
@@ -925,10 +979,19 @@ def cmd_apply(args):
             if blur:
                 try:
                     blur_handler = BlurHandler()
-                    # Use theme's background color as tint with specified opacity
+                    # Use custom tint if specified, otherwise use theme's background color
+                    blur_tint = tint_color if tint_color else theme.colors['background']
                     blur_opacity = opacity if opacity else 70  # Default to 70% for blur
-                    blur_handler.apply_acrylic_blur(theme.colors['background'], blur_opacity)
-                    print(f"  Blur: Applied to current window (Fluent acrylic with theme tint)")
+                    
+                    # Set minimum opacity of 60% in WindowAlpha for glass to show through
+                    if opacity and opacity < 60:
+                        handler.set_opacity(60)
+                        print(f"  Window opacity set to 60% (minimum for glass effect)")
+                    
+                    blur_handler.apply_acrylic_blur(blur_tint, blur_opacity)
+                    
+                    tint_desc = f"custom tint {tint_color}" if tint_color else "theme tint"
+                    print(f"  Blur: Applied to current window (Fluent acrylic with {tint_desc}, {blur_opacity}% strength)")
                     print()
                     print("Note: Blur is not persistent for legacy console.")
                     print("Use 'python cmd_theme.py autoblur on' to enable blur for all new CMD windows.")
@@ -939,7 +1002,7 @@ def cmd_apply(args):
             print("Open a new Command Prompt window to see the changes.")
             
             # Save to history AFTER successful apply
-            backup_manager.save_state_before_apply(theme.name, opacity, blur)
+            backup_manager.save_state_before_apply(theme.name, opacity, blur, tint_color)
         except PermissionError as e:
             print(f"ERROR: {e}", file=sys.stderr)
             print(file=sys.stderr)
@@ -1047,12 +1110,24 @@ def cmd_autoblur(args):
 
 
 def cmd_status(args):
-    """Handle status command - show current theme, opacity, blur, and autoblur state."""
+    """Handle status command - show current theme, opacity, blur, tint, and autoblur state."""
     handler = RegistryHandler()
     wt_handler = WindowsTerminalHandler()
+    backup_manager = BackupManager()
     
     print("Current Console Settings:")
     print()
+    
+    # Try to get last applied settings from history
+    last_state = None
+    try:
+        if backup_manager.history_file.exists():
+            with open(backup_manager.history_file, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+                if history:
+                    last_state = history[-1]
+    except:
+        pass
     
     # Check console type
     if wt_handler.is_available():
@@ -1074,6 +1149,9 @@ def cmd_status(args):
                 print(f"  Blur: Enabled (acrylic)")
             else:
                 print(f"  Blur: Disabled")
+            
+            if last_state and last_state.get('tint'):
+                print(f"  Tint: {last_state['tint']} (applies to legacy CMD only)")
         else:
             print("  Could not read Windows Terminal settings")
     else:
@@ -1086,6 +1164,10 @@ def cmd_status(args):
             print(f"  Opacity: {opacity}%")
         else:
             print(f"  Opacity: 100% (default)")
+        
+        # Show tint from last state
+        if last_state and last_state.get('tint'):
+            print(f"  Tint: {last_state['tint']}")
         
         # Check autoblur
         is_autoblur = handler.is_autoblur_enabled()
@@ -1100,8 +1182,12 @@ def cmd_status(args):
     
     print()
     
+    # Show last applied theme
+    if last_state:
+        print(f"Last Applied Theme: {last_state['theme']}")
+        print()
+    
     # Check for backup
-    backup_manager = BackupManager()
     if backup_manager.backup_exists():
         print("Backup: Available (use 'restore' to revert)")
     else:
@@ -1127,6 +1213,7 @@ def cmd_undo(args):
     theme_name = state_to_restore.get('theme')
     opacity = state_to_restore.get('opacity')
     blur = state_to_restore.get('blur', False)
+    tint = state_to_restore.get('tint')
     
     if not theme_name:
         # No theme name stored, just restore opacity/blur settings
@@ -1156,6 +1243,8 @@ def cmd_undo(args):
                 print(f"  Opacity: {opacity}%")
             if blur:
                 print(f"  Blur: Enabled")
+            if tint:
+                print(f"  Note: Custom tint ({tint}) only applies to legacy CMD")
             print()
             print("Restart Windows Terminal or open a new tab to see the changes.")
         except Exception as e:
@@ -1188,12 +1277,21 @@ def cmd_undo(args):
                 try:
                     blur_handler = BlurHandler()
                     if theme_name and theme:
-                        # Use theme's background color for blur
+                        # Use custom tint if stored, otherwise use theme's background color
+                        blur_tint = tint if tint else theme.colors['background']
                         blur_opacity = opacity if opacity else 70
-                        blur_handler.apply_acrylic_blur(theme.colors['background'], blur_opacity)
+                        
+                        # Set minimum opacity of 60% in WindowAlpha for glass to show through
+                        if opacity and opacity < 60:
+                            handler.set_opacity(60)
+                        
+                        blur_handler.apply_acrylic_blur(blur_tint, blur_opacity)
+                        
+                        tint_desc = f"custom tint {tint}" if tint else "theme tint"
+                        print(f"  Blur: Applied to current window ({tint_desc})")
                     else:
                         blur_handler.apply_blur()
-                    print(f"  Blur: Applied to current window")
+                        print(f"  Blur: Applied to current window")
                 except Exception as e:
                     print(f"  Blur: Failed to apply - {e}", file=sys.stderr)
             
@@ -1231,6 +1329,7 @@ def main():
     parser_apply.add_argument('--opacity', type=int, metavar='N', help='Set opacity (30-100 percent)')
     parser_apply.add_argument('--blur', action='store_true', help='Enable acrylic blur effect')
     parser_apply.add_argument('--glass', action='store_true', help='Preset: --opacity 70 --blur')
+    parser_apply.add_argument('--tint', metavar='COLOR', help='Custom tint color (hex #RRGGBB or name: red, blue, green, purple, pink, orange, cyan, yellow, teal, white, black). Implies --blur.')
     parser_apply.add_argument('--keep-effects', action='store_true', help='Keep current opacity and blur settings')
     parser_apply.set_defaults(func=cmd_apply)
     
