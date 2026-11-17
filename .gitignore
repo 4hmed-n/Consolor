@@ -3,3 +3,7 @@ dist/
 *.spec
 console-backup.reg
 __pycache__/
+# no extra docs, only the root README
+*.md
+!/README.md
+build.bat

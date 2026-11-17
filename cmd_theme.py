@@ -448,8 +448,14 @@ class BlurHandler:
         except AttributeError:
             self.SetWindowCompositionAttribute = None
     
-    def apply_blur(self):
-        """Apply blur to the current console window."""
+    def apply_acrylic_blur(self, tint_color_hex, tint_opacity_percent):
+        """
+        Apply Fluent acrylic blur with theme-based tint color.
+        
+        Args:
+            tint_color_hex: Theme background color in #RRGGBB format
+            tint_opacity_percent: Tint opacity 30-100% (lower = more transparent/blurry)
+        """
         if not self.SetWindowCompositionAttribute:
             raise Exception("SetWindowCompositionAttribute not available on this system")
         
@@ -458,11 +464,15 @@ class BlurHandler:
         if not hwnd:
             raise Exception("Could not get console window handle")
         
+        # Convert hex color to BGR format and add tint opacity
+        # Format: 0xAABBGGRR (A=alpha/tint opacity, BGR=color)
+        gradient_color = self._hex_to_gradient_color(tint_color_hex, tint_opacity_percent)
+        
         # Try acrylic blur first (state 4)
         accent = self.ACCENT_POLICY()
         accent.AccentState = self.ACCENT_ENABLE_ACRYLICBLURBEHIND
         accent.AccentFlags = 2
-        accent.GradientColor = 0x99202020  # ABGR format
+        accent.GradientColor = gradient_color
         accent.AnimationId = 0
         
         data = self.WINDOWCOMPOSITIONATTRIBDATA()
@@ -481,6 +491,39 @@ class BlurHandler:
             raise Exception("Failed to apply blur effect")
         
         return True
+    
+    def _hex_to_gradient_color(self, hex_color, opacity_percent):
+        """
+        Convert theme hex color and opacity to GradientColor DWORD.
+        Format: 0xAABBGGRR where AA=tint opacity, BBGGRR=BGR color
+        
+        Args:
+            hex_color: #RRGGBB format
+            opacity_percent: 30-100 (tint opacity, lower = more see-through)
+        
+        Returns:
+            DWORD in 0xAABBGGRR format
+        """
+        # Parse RGB from hex
+        hex_color = hex_color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        
+        # Convert opacity percent to alpha byte (0-255)
+        # Clamp to 30-100 range for readability
+        opacity_percent = max(30, min(100, opacity_percent))
+        alpha = round(opacity_percent * 255 / 100)
+        
+        # Format: 0xAABBGGRR (alpha, blue, green, red)
+        gradient_color = (alpha << 24) | (b << 16) | (g << 8) | r
+        
+        return gradient_color
+    
+    def apply_blur(self):
+        """Legacy method for backward compatibility - uses hardcoded dark tint."""
+        # Use a default dark grey tint for legacy blur command
+        return self.apply_acrylic_blur("#202020", 60)
 
 
 class BackupManager:
@@ -817,8 +860,10 @@ def cmd_apply(args):
     opacity = args.opacity
     blur = args.blur
     if args.glass:
-        opacity = 70
+        # Glass preset: enable blur and set opacity to 70 if not explicitly specified
         blur = True
+        if opacity is None:
+            opacity = 70
     
     # Determine if we should reset effects or keep them
     # Reset to solid (100%, no blur) unless:
@@ -880,8 +925,10 @@ def cmd_apply(args):
             if blur:
                 try:
                     blur_handler = BlurHandler()
-                    blur_handler.apply_blur()
-                    print(f"  Blur: Applied to current window")
+                    # Use theme's background color as tint with specified opacity
+                    blur_opacity = opacity if opacity else 70  # Default to 70% for blur
+                    blur_handler.apply_acrylic_blur(theme.colors['background'], blur_opacity)
+                    print(f"  Blur: Applied to current window (Fluent acrylic with theme tint)")
                     print()
                     print("Note: Blur is not persistent for legacy console.")
                     print("Use 'python cmd_theme.py autoblur on' to enable blur for all new CMD windows.")
@@ -1140,7 +1187,12 @@ def cmd_undo(args):
             if blur:
                 try:
                     blur_handler = BlurHandler()
-                    blur_handler.apply_blur()
+                    if theme_name and theme:
+                        # Use theme's background color for blur
+                        blur_opacity = opacity if opacity else 70
+                        blur_handler.apply_acrylic_blur(theme.colors['background'], blur_opacity)
+                    else:
+                        blur_handler.apply_blur()
                     print(f"  Blur: Applied to current window")
                 except Exception as e:
                     print(f"  Blur: Failed to apply - {e}", file=sys.stderr)
