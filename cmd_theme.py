@@ -401,6 +401,54 @@ class RegistryHandler:
         return (f'"{script_path}" blur' in autorun or 
                 'cmd_theme.py blur' in autorun or 
                 'cmd_theme blur' in autorun)
+    
+    def enable_autoblur(self):
+        """Enable autoblur - returns True if successful, False if already enabled."""
+        current_autorun = self.get_autorun()
+        
+        # Get the path to this script
+        script_path = os.path.abspath(__file__)
+        blur_command = f'python "{script_path}" blur'
+        
+        # Check if already enabled
+        if current_autorun and blur_command in current_autorun:
+            return False  # Already enabled
+        
+        # Chain with existing AutoRun if present
+        if current_autorun:
+            new_autorun = f"{current_autorun} & {blur_command}"
+        else:
+            new_autorun = blur_command
+        
+        self.set_autorun(new_autorun)
+        return True
+    
+    def disable_autoblur(self):
+        """Disable autoblur - returns True if successful, False if not enabled."""
+        current_autorun = self.get_autorun()
+        
+        if not current_autorun:
+            return False  # Not enabled
+        
+        # Get the path to this script
+        script_path = os.path.abspath(__file__)
+        blur_command = f'python "{script_path}" blur'
+        
+        # Remove blur command from AutoRun
+        if blur_command not in current_autorun:
+            return False  # Not enabled
+        
+        # Remove the blur command
+        new_autorun = current_autorun.replace(blur_command, '').strip()
+        # Clean up any leftover & separators
+        new_autorun = new_autorun.replace('& &', '&').strip('& ').strip()
+        
+        if new_autorun:
+            self.set_autorun(new_autorun)
+        else:
+            self.set_autorun(None)
+        
+        return True
 
 
 class BlurHandler:
@@ -1036,15 +1084,22 @@ def cmd_apply(args):
                     
                     tint_desc = f"custom tint {tint_color}" if tint_color else "theme tint"
                     print(f"  Blur: Applied to current window (Fluent acrylic with {tint_desc}, {blur_opacity}% strength)")
-                    print()
-                    print("Note: Blur is not persistent for legacy console.")
-                    print("Use 'python cmd_theme.py autoblur on' to enable blur for all new CMD windows.")
+                    
+                    # Automatically enable autoblur when using glass effects
+                    autoblur_enabled = handler.enable_autoblur()
+                    if autoblur_enabled:
+                        print(f"  Autoblur: Enabled for new CMD windows")
+                    else:
+                        print(f"  Autoblur: Already enabled")
                 except Exception as e:
                     print(f"  Blur: Failed to apply - {e}", file=sys.stderr)
             else:
-                # No blur requested - clear saved blur settings if not keeping effects
+                # No blur requested - clear saved blur settings and disable autoblur if not keeping effects
                 if not keep_effects:
                     backup_manager.clear_blur_settings()
+                    autoblur_disabled = handler.disable_autoblur()
+                    if autoblur_disabled:
+                        print(f"  Autoblur: Disabled")
             
             print()
             print("Open a new Command Prompt window to see the changes.")
