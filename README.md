@@ -1,65 +1,125 @@
-# CMD Theme Pack
+# Consolor
 
-A command-line utility for managing and applying color schemes to Windows Command Prompt environments.
+Apply color themes to Windows Command Prompt and terminal with transparency and blur effects.
 
-## Features
+## Installation
 
-- 🎨 Curated collection of beautiful CMD themes
-- 🔄 Easy theme switching with backup/restore functionality
-- 👁️ Preview themes before applying
-- 🪟 Supports both Windows Terminal and legacy console
-- 📦 Single executable with embedded themes
+**Option 1: Executable (Windows)**
 
-## Project Structure
+Download `cmd_theme.exe` from [Releases](https://github.com/yourusername/consolor/releases).
 
-```
-cmd-theme/
-├── src/
-│   ├── main.rs              # Application entry point
-│   ├── cli.rs               # Command-line interface
-│   ├── theme.rs             # Theme data structures
-│   ├── theme_loader.rs      # Theme loading and validation
-│   ├── console_detector.rs  # Console type detection
-│   ├── wt_handler.rs        # Windows Terminal handler
-│   ├── registry_handler.rs  # Legacy console registry handler
-│   ├── backup_manager.rs    # Backup/restore functionality
-│   ├── previewer.rs         # Theme preview display
-│   └── themes/              # Embedded theme files
-├── Cargo.toml               # Project dependencies
-└── README.md                # This file
-```
+**Option 2: Python Script**
 
-## Building
-
-Requires Rust toolchain (1.70+):
+Requires Python 3.6+. No external dependencies.
 
 ```bash
-cargo build --release
+python cmd_theme.py <command>
 ```
 
-The compiled executable will be in `target/release/cmd-theme.exe`.
+## Commands
 
-## Usage
+### List Themes
 
 ```bash
-# List all available themes
-cmd-theme list
-
-# Preview a theme
-cmd-theme preview dracula
-
-# Apply a theme
-cmd-theme apply dracula
-
-# Restore from backup
-cmd-theme restore
+cmd_theme list              # All themes
+cmd_theme list --dark       # Dark themes only
+cmd_theme list --light      # Light themes only
 ```
 
-## Requirements
+### Preview Theme
 
-- Windows 10 or Windows 11
-- Administrator privileges may be required for legacy console registry modifications
+```bash
+cmd_theme preview <theme>   # Shows colors as colored blocks
+```
+
+### Apply Theme
+
+```bash
+cmd_theme apply <theme>                    # Apply theme (resets to solid)
+cmd_theme apply <theme> --opacity 80       # Set opacity (30-100%)
+cmd_theme apply <theme> --blur             # Enable acrylic blur
+cmd_theme apply <theme> --glass            # Preset: 70% opacity + blur
+cmd_theme apply <theme> --keep-effects     # Keep current opacity/blur
+cmd_theme apply random                     # Random theme selection
+```
+
+### Undo
+
+```bash
+cmd_theme undo              # Revert to previous theme
+```
+
+### Restore
+
+```bash
+cmd_theme restore           # Restore original settings from backup
+```
+
+### Status
+
+```bash
+cmd_theme status            # Show current theme, opacity, blur state
+```
+
+### Blur (Legacy CMD Only)
+
+```bash
+cmd_theme blur              # Apply blur to current window
+cmd_theme autoblur on       # Enable blur for all new CMD windows
+cmd_theme autoblur off      # Disable autoblur
+```
+
+## Available Themes
+
+- Dracula
+- GitHub Light
+- Gruvbox Dark
+- Monokai
+- Nord
+- One Dark
+- One Light
+- Solarized Dark
+- Solarized Light
+- Tokyo Night
+
+## Examples
+
+```bash
+# Apply Nord with 75% opacity and blur
+cmd_theme apply Nord --opacity 75 --blur
+
+# Try different themes while keeping effects
+cmd_theme apply Nord --glass
+cmd_theme apply Dracula --keep-effects
+cmd_theme apply Monokai --keep-effects
+
+# Random theme with glass effect
+cmd_theme apply random --glass
+
+# Undo last change
+cmd_theme undo
+
+# Check current settings
+cmd_theme status
+```
+
+## Security Note
+
+The executable is unsigned and modifies the Windows registry (`HKCU\Console`). Windows SmartScreen and antivirus software may flag it. The source code is available for inspection. To build from source:
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --add-data "src/themes;src/themes" --name cmd_theme cmd_theme.py
+```
+
+## Technical Details
+
+- Modifies `HKEY_CURRENT_USER\Console` for color settings
+- Uses `WindowAlpha` registry value for opacity (77-255)
+- Blur uses Windows API `SetWindowCompositionAttribute` (non-persistent for CMD)
+- Backup stored in `%LOCALAPPDATA%\cmd-theme-pack\backup.json`
+- History stored in `%LOCALAPPDATA%\cmd-theme-pack\history.json`
 
 ## License
 
-See LICENSE file for details.
+MIT License
