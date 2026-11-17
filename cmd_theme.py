@@ -532,13 +532,14 @@ class BlurHandler:
         
         return color_input
     
-    def apply_acrylic_blur(self, tint_color_hex, tint_opacity_percent):
+    def apply_acrylic_blur(self, tint_color_hex, tint_opacity_percent, use_acrylic=False):
         """
-        Apply Fluent acrylic blur with theme-based tint color.
+        Apply blur with theme-based tint color.
         
         Args:
             tint_color_hex: Theme background color in #RRGGBB format
             tint_opacity_percent: Tint opacity 30-100% (lower = more transparent/blurry)
+            use_acrylic: If True, use state 4 (acrylic, laggy on drag). If False, use state 3 (regular blur)
         """
         if not self.SetWindowCompositionAttribute:
             raise Exception("SetWindowCompositionAttribute not available on this system")
@@ -552,24 +553,32 @@ class BlurHandler:
         # Format: 0xAABBGGRR (A=alpha/tint opacity, BGR=color)
         gradient_color = self._hex_to_gradient_color(tint_color_hex, tint_opacity_percent)
         
-        # Try acrylic blur first (state 4)
-        accent = self.ACCENT_POLICY()
-        accent.AccentState = self.ACCENT_ENABLE_ACRYLICBLURBEHIND
-        accent.AccentFlags = 2
-        accent.GradientColor = gradient_color
-        accent.AnimationId = 0
+        # Use state 3 (BLURBEHIND) by default for better performance
+        # State 4 (ACRYLICBLURBEHIND) causes drag lag on Windows 10
+        accent_state = self.ACCENT_ENABLE_ACRYLICBLURBEHIND if use_acrylic else self.ACCENT_ENABLE_BLURBEHIND
         
-        data = self.WINDOWCOMPOSITIONATTRIBDATA()
-        data.Attribute = self.WCA_ACCENT_POLICY
-        data.Data = ctypes.pointer(accent)
-        data.SizeOfData = ctypes.sizeof(accent)
+        # Try different AccentFlags to prevent edge bleed
+        # Flags tested: 0, 2, 0x20|0x40|0x80|0x100 (border flags)
+        accent_flags_to_try = [2, 0, 0x20 | 0x40 | 0x80 | 0x100]
         
-        result = self.SetWindowCompositionAttribute(hwnd, ctypes.pointer(data))
-        
-        # If acrylic fails, fall back to regular blur (state 3)
-        if not result:
-            accent.AccentState = self.ACCENT_ENABLE_BLURBEHIND
+        result = False
+        for accent_flags in accent_flags_to_try:
+            accent = self.ACCENT_POLICY()
+            accent.AccentState = accent_state
+            accent.AccentFlags = accent_flags
+            accent.GradientColor = gradient_color
+            accent.AnimationId = 0
+            
+            data = self.WINDOWCOMPOSITIONATTRIBDATA()
+            data.Attribute = self.WCA_ACCENT_POLICY
+            data.Data = ctypes.pointer(accent)
+            data.SizeOfData = ctypes.sizeof(accent)
+            
             result = self.SetWindowCompositionAttribute(hwnd, ctypes.pointer(data))
+            
+            if result:
+                # Success with this flag combination
+                break
         
         if not result:
             raise Exception("Failed to apply blur effect")
@@ -604,10 +613,10 @@ class BlurHandler:
         
         return gradient_color
     
-    def apply_blur(self):
+    def apply_blur(self, use_acrylic=False):
         """Legacy method for backward compatibility - uses hardcoded dark tint."""
         # Use a default dark grey tint for legacy blur command
-        return self.apply_acrylic_blur("#202020", 60)
+        return self.apply_acrylic_blur("#202020", 60, use_acrylic=use_acrylic)
 
 
 class BackupManager:
@@ -624,13 +633,14 @@ class BackupManager:
         """Check if a backup exists."""
         return self.backup_file.exists()
     
-    def save_blur_settings(self, tint=None, opacity=None, theme_background=None):
+    def save_blur_settings(self, tint=None, opacity=None, theme_background=None, use_acrylic=False):
         """Save blur settings for autoblur to use."""
         try:
             settings = {
                 'tint': tint,
                 'opacity': opacity,
-                'theme_background': theme_background
+                'theme_background': theme_background,
+                'use_acrylic': use_acrylic
             }
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=2)
@@ -987,6 +997,8 @@ def cmd_apply(args):
     # Handle --glass preset
     opacity = args.opacity
     blur = args.blur
+    use_acrylic = args.acrylic if hasattr(args, 'acrylic') else False
+    
     if args.glass:
         # Glass preset: enable blur and set opacity to 70 if not explicitly specified
         blur = True
@@ -1002,9 +1014,9 @@ def cmd_apply(args):
     
     # Determine if we should reset effects or keep them
     # Reset to solid (100%, no blur, no tint) unless:
-    # 1. User specified --opacity, --blur, --glass, or --tint
+    # 1. User specified --opacity, --blur, --glass, --tint, or --acrylic
     # 2. User specified --keep-effects
-    user_specified_effects = args.opacity is not None or args.blur or args.glass or args.tint
+    user_specified_effects = args.opacity is not None or args.blur or args.glass or args.tint or use_acrylic
     keep_effects = args.keep_effects
     
     if not user_specified_effects and not keep_effects:
@@ -1072,7 +1084,8 @@ def cmd_apply(args):
                     backup_manager.save_blur_settings(
                         tint=tint_color,
                         opacity=opacity,
-                        theme_background=theme.colors['background']
+                        theme_background=theme.colors['background'],
+                        use_acrylic=use_acrylic
                     )
                     
                     # Set minimum opacity of 60% in WindowAlpha for glass to show through
@@ -1080,10 +1093,11 @@ def cmd_apply(args):
                         handler.set_opacity(60)
                         print(f"  Window opacity set to 60% (minimum for glass effect)")
                     
-                    blur_handler.apply_acrylic_blur(blur_tint, blur_opacity)
+                    blur_handler.apply_acrylic_blur(blur_tint, blur_opacity, use_acrylic=use_acrylic)
                     
                     tint_desc = f"custom tint {tint_color}" if tint_color else "theme tint"
-                    print(f"  Blur: Applied to current window (Fluent acrylic with {tint_desc}, {blur_opacity}% strength)")
+                    blur_type = "acrylic" if use_acrylic else "blur"
+                    print(f"  Blur: Applied to current window ({blur_type} with {tint_desc}, {blur_opacity}% strength)")
                     
                     # Automatically enable autoblur when using glass effects
                     autoblur_enabled = handler.enable_autoblur()
@@ -1139,8 +1153,7 @@ def cmd_restore(args):
 def cmd_blur(args):
     """Handle blur command - apply blur to current console window."""
     try:
-        # Check if we're being called from autoblur (silent mode)
-        # AutoRun typically passes command line directly, so check if stdout is a TTY
+        # Autoblur should be silent - don't print messages
         is_interactive = sys.stdout.isatty()
         
         backup_manager = BackupManager()
@@ -1154,21 +1167,25 @@ def cmd_blur(args):
             tint = settings.get('tint')
             opacity = settings.get('opacity')
             theme_background = settings.get('theme_background')
+            use_acrylic = settings.get('use_acrylic', False)
             
             blur_tint = tint if tint else (theme_background if theme_background else '#202020')
             blur_opacity = opacity if opacity else 70
             
-            blur_handler.apply_acrylic_blur(blur_tint, blur_opacity)
+            blur_handler.apply_acrylic_blur(blur_tint, blur_opacity, use_acrylic=use_acrylic)
             
+            # Only print in interactive mode (not when called by autoblur)
             if is_interactive:
                 tint_desc = f"custom tint {tint}" if tint else "theme tint"
-                print(f"✓ Blur effect applied (Fluent acrylic with {tint_desc}, {blur_opacity}% strength)")
+                blur_type = "acrylic" if use_acrylic else "blur"
+                print(f"✓ Blur effect applied ({blur_type} with {tint_desc}, {blur_opacity}% strength)")
         else:
             # No saved settings, use default
             blur_handler.apply_blur()
             if is_interactive:
                 print("✓ Blur effect applied to current console window")
     except Exception as e:
+        # Only print errors in interactive mode
         if sys.stdout.isatty():
             print(f"ERROR: Failed to apply blur: {e}", file=sys.stderr)
         sys.exit(1)
@@ -1459,9 +1476,10 @@ def main():
     parser_apply = subparsers.add_parser('apply', help='Apply a theme to the console')
     parser_apply.add_argument('theme_name', help='Theme name to apply (or "random" for random selection)')
     parser_apply.add_argument('--opacity', type=int, metavar='N', help='Set opacity (30-100 percent)')
-    parser_apply.add_argument('--blur', action='store_true', help='Enable acrylic blur effect')
+    parser_apply.add_argument('--blur', action='store_true', help='Enable blur effect (state 3, no drag lag)')
     parser_apply.add_argument('--glass', action='store_true', help='Preset: --opacity 70 --blur')
     parser_apply.add_argument('--tint', metavar='COLOR', help='Custom tint color (hex #RRGGBB or name: red, blue, green, purple, pink, orange, cyan, yellow, teal, white, black). Implies --blur.')
+    parser_apply.add_argument('--acrylic', action='store_true', help='Use acrylic blur (state 4) instead of regular blur. WARNING: Causes drag lag on Windows 10.')
     parser_apply.add_argument('--keep-effects', action='store_true', help='Keep current opacity and blur settings')
     parser_apply.set_defaults(func=cmd_apply)
     
