@@ -569,11 +569,44 @@ class BackupManager:
         self.backup_dir = Path.home() / 'AppData' / 'Local' / 'cmd-theme-pack'
         self.backup_file = self.backup_dir / 'backup.json'
         self.history_file = self.backup_dir / 'history.json'
+        self.settings_file = self.backup_dir / 'settings.json'
         self.backup_dir.mkdir(parents=True, exist_ok=True)
     
     def backup_exists(self):
         """Check if a backup exists."""
         return self.backup_file.exists()
+    
+    def save_blur_settings(self, tint=None, opacity=None, theme_background=None):
+        """Save blur settings for autoblur to use."""
+        try:
+            settings = {
+                'tint': tint,
+                'opacity': opacity,
+                'theme_background': theme_background
+            }
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=2)
+        except Exception as e:
+            # Don't fail if settings can't be saved
+            pass
+    
+    def load_blur_settings(self):
+        """Load saved blur settings."""
+        try:
+            if self.settings_file.exists():
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except:
+            pass
+        return None
+    
+    def clear_blur_settings(self):
+        """Clear saved blur settings."""
+        try:
+            if self.settings_file.exists():
+                self.settings_file.unlink()
+        except:
+            pass
     
     def save_state_before_apply(self, theme_name, opacity=None, blur=False, tint=None):
         """Save the state we're ABOUT TO APPLY (so undo can revert to it)."""
@@ -916,6 +949,9 @@ def cmd_apply(args):
     if tint_color:
         blur = True
     
+    # Create backup manager early (needed for clearing settings)
+    backup_manager = BackupManager()
+    
     # Determine if we should reset effects or keep them
     # Reset to solid (100%, no blur, no tint) unless:
     # 1. User specified --opacity, --blur, --glass, or --tint
@@ -928,9 +964,10 @@ def cmd_apply(args):
         opacity = 100
         blur = False
         tint_color = None
+        # Clear saved blur settings
+        backup_manager.clear_blur_settings()
     
-    # Create backup
-    backup_manager = BackupManager()
+    # Create backup if it doesn't exist
     if not backup_manager.backup_exists():
         try:
             backup_manager.create_backup()
@@ -983,6 +1020,13 @@ def cmd_apply(args):
                     blur_tint = tint_color if tint_color else theme.colors['background']
                     blur_opacity = opacity if opacity else 70  # Default to 70% for blur
                     
+                    # Save blur settings for autoblur to use
+                    backup_manager.save_blur_settings(
+                        tint=tint_color,
+                        opacity=opacity,
+                        theme_background=theme.colors['background']
+                    )
+                    
                     # Set minimum opacity of 60% in WindowAlpha for glass to show through
                     if opacity and opacity < 60:
                         handler.set_opacity(60)
@@ -997,6 +1041,10 @@ def cmd_apply(args):
                     print("Use 'python cmd_theme.py autoblur on' to enable blur for all new CMD windows.")
                 except Exception as e:
                     print(f"  Blur: Failed to apply - {e}", file=sys.stderr)
+            else:
+                # No blur requested - clear saved blur settings if not keeping effects
+                if not keep_effects:
+                    backup_manager.clear_blur_settings()
             
             print()
             print("Open a new Command Prompt window to see the changes.")
@@ -1026,6 +1074,8 @@ def cmd_restore(args):
     
     try:
         backup_manager.restore_backup()
+        # Clear saved blur settings on restore
+        backup_manager.clear_blur_settings()
     except Exception as e:
         print(f"ERROR: Failed to restore from backup: {e}", file=sys.stderr)
         sys.exit(1)
@@ -1034,11 +1084,38 @@ def cmd_restore(args):
 def cmd_blur(args):
     """Handle blur command - apply blur to current console window."""
     try:
+        # Check if we're being called from autoblur (silent mode)
+        # AutoRun typically passes command line directly, so check if stdout is a TTY
+        is_interactive = sys.stdout.isatty()
+        
+        backup_manager = BackupManager()
         blur_handler = BlurHandler()
-        blur_handler.apply_blur()
-        print("✓ Blur effect applied to current console window")
+        
+        # Load saved blur settings
+        settings = backup_manager.load_blur_settings()
+        
+        if settings:
+            # Use saved tint if available, otherwise use saved theme background
+            tint = settings.get('tint')
+            opacity = settings.get('opacity')
+            theme_background = settings.get('theme_background')
+            
+            blur_tint = tint if tint else (theme_background if theme_background else '#202020')
+            blur_opacity = opacity if opacity else 70
+            
+            blur_handler.apply_acrylic_blur(blur_tint, blur_opacity)
+            
+            if is_interactive:
+                tint_desc = f"custom tint {tint}" if tint else "theme tint"
+                print(f"✓ Blur effect applied (Fluent acrylic with {tint_desc}, {blur_opacity}% strength)")
+        else:
+            # No saved settings, use default
+            blur_handler.apply_blur()
+            if is_interactive:
+                print("✓ Blur effect applied to current console window")
     except Exception as e:
-        print(f"ERROR: Failed to apply blur: {e}", file=sys.stderr)
+        if sys.stdout.isatty():
+            print(f"ERROR: Failed to apply blur: {e}", file=sys.stderr)
         sys.exit(1)
 
 
