@@ -1,0 +1,95 @@
+Verification of hex_to_colorref Implementation
+==============================================
+
+Function Purpose:
+- Convert hex color (#RRGGBB) to Windows COLORREF format (0x00BBGGRR)
+- Windows uses BGR (Blue-Green-Red) order, not RGB
+
+Implementation Logic:
+1. Validate input starts with '#'
+2. Validate input length is exactly 7 characters
+3. Parse R, G, B components from hex string
+4. Convert to BGR DWORD: (B << 16) | (G << 8) | R
+
+Test Cases Verification:
+------------------------
+
+Test 1: Pure Red #FF0000
+  R = 0xFF (255), G = 0x00 (0), B = 0x00 (0)
+  Result: (0 << 16) | (0 << 8) | 255 = 0x000000FF ✓
+
+Test 2: Pure Green #00FF00
+  R = 0x00 (0), G = 0xFF (255), B = 0x00 (0)
+  Result: (0 << 16) | (255 << 8) | 0 = 0x0000FF00 ✓
+
+Test 3: Pure Blue #0000FF
+  R = 0x00 (0), G = 0x00 (0), B = 0xFF (255)
+  Result: (255 << 16) | (0 << 8) | 0 = 0x00FF0000 ✓
+
+Test 4: White #FFFFFF
+  R = 0xFF (255), G = 0xFF (255), B = 0xFF (255)
+  Result: (255 << 16) | (255 << 8) | 255 = 0x00FFFFFF ✓
+
+Test 5: Black #000000
+  R = 0x00 (0), G = 0x00 (0), B = 0x00 (0)
+  Result: (0 << 16) | (0 << 8) | 0 = 0x00000000 ✓
+
+Test 6: Dracula Background #282a36
+  R = 0x28 (40), G = 0x2a (42), B = 0x36 (54)
+  Result: (54 << 16) | (42 << 8) | 40 
+        = 0x00360000 | 0x00002a00 | 0x00000028
+        = 0x00362a28 ✓
+
+Test 7: Cyan #00FFFF
+  R = 0x00 (0), G = 0xFF (255), B = 0xFF (255)
+  Result: (255 << 16) | (255 << 8) | 0 = 0x00FFFF00 ✓
+
+Test 8: Magenta #FF00FF
+  R = 0xFF (255), G = 0x00 (0), B = 0xFF (255)
+  Result: (255 << 16) | (0 << 8) | 255 = 0x00FF00FF ✓
+
+Test 9: Yellow #FFFF00
+  R = 0xFF (255), G = 0xFF (255), B = 0x00 (0)
+  Result: (0 << 16) | (255 << 8) | 255 = 0x0000FFFF ✓
+
+Error Handling Tests:
+--------------------
+
+Test 10: Missing # - "FF0000"
+  Expected: InvalidFormat error with message "must start with '#'"
+  Implementation: Checks !hex.starts_with('#') ✓
+
+Test 11: Wrong length - "#FF00"
+  Expected: InvalidFormat error with message "must be 7 characters"
+  Implementation: Checks hex.len() != 7 ✓
+
+Test 12: Invalid hex characters - "#GG0000"
+  Expected: ParseError with component identification
+  Implementation: u32::from_str_radix catches invalid hex, wrapped with descriptive error ✓
+
+Requirements Validation:
+-----------------------
+
+Requirement 5.2: Hex to BGR DWORD Conversion Function
+✓ Implements hex_to_colorref parsing #RRGGBB to RGB values
+✓ Converts RGB to BGR format: (B << 16) | (G << 8) | R
+✓ Handles parsing errors with descriptive messages
+✓ Returns Result<u32, ColorError>
+
+Implementation Summary:
+----------------------
+The hex_to_colorref function is fully implemented with:
+- Input validation (format and length)
+- RGB component parsing with error handling
+- BGR DWORD conversion using bitwise operations
+- Descriptive error messages for all failure cases
+- 10 comprehensive unit tests covering:
+  * Basic colors (red, green, blue)
+  * Grayscale (white, black, gray)
+  * Mixed colors (cyan, magenta, yellow)
+  * Case insensitivity
+  * Real theme colors
+  * Error cases (missing hash, invalid length, invalid characters)
+  * Edge cases and descriptive error messages
+
+Status: COMPLETE ✓

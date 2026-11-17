@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "name": "Monokai",
+  "description": "Warm color scheme popular in Sublime Text with vibrant accents",
+  "author": "Wimer Hazenberg",
+  "palette_type": "Dark",
+  "colors": {
+    "background": "#272822",
+    "foreground": "#f8f8f2",
+    "black": "#272822",
+    "red": "#f92672",
+    "green": "#a6e22e",
+    "yellow": "#f4bf75",
+    "blue": "#66d9ef",
+    "magenta": "#ae81ff",
+    "cyan": "#a1efe4",
+    "white": "#f8f8f2",
+    "bright_black": "#75715e",
+    "bright_red": "#f92672",
+    "bright_green": "#a6e22e",
+    "bright_yellow": "#e6db74",
+    "bright_blue": "#66d9ef",
+    "bright_magenta": "#ae81ff",
+    "bright_cyan": "#a1efe4",
+    "bright_white": "#f9f8f5"
+  }
+}
