@@ -2264,6 +2264,52 @@ class BackupManager:
             # Don't fail - just log
             pass
     
+    def reset_original_snapshot(self):
+        """Delete the original snapshot file."""
+        if self.original_snapshot_exists():
+            try:
+                self.original_snapshot_file.unlink()
+                return True
+            except Exception as e:
+                return False
+        return False
+    
+    def check_snapshot_matches_theme(self):
+        """Check if original snapshot colors match any known theme.
+        Returns (matches, theme_name) tuple."""
+        if not self.original_snapshot_exists():
+            return (False, None)
+        
+        try:
+            with open(self.original_snapshot_file, 'r', encoding='utf-8') as f:
+                snapshot = json.load(f)
+            
+            if not snapshot.get('global_colors'):
+                return (False, None)
+            
+            # Get snapshot ColorTable00 (black color)
+            snapshot_black = snapshot['global_colors']['color_table'][0]
+            
+            # Load all themes and check for matches
+            loader = ThemeLoader()
+            themes = loader.list_themes()
+            
+            for theme in themes:
+                # Convert theme's black color to COLORREF format
+                black_hex = theme.colors['black'].lstrip('#')
+                r = int(black_hex[0:2], 16)
+                g = int(black_hex[2:4], 16)
+                b = int(black_hex[4:6], 16)
+                theme_black = (b << 16) | (g << 8) | r
+                
+                # Check if it matches
+                if theme_black == snapshot_black:
+                    return (True, theme.name)
+            
+            return (False, None)
+        except:
+            return (False, None)
+    
     def restore_defaults(self):
         """Restore Windows built-in defaults by deleting color values from global console key."""
         handler = RegistryHandler()
@@ -3166,7 +3212,7 @@ def cmd_apply(args):
         shells_to_apply = []
         if shell_target == 'both':
             shells_to_apply = [None]  # Apply to global key
-            shell_desc = "both CMD and PowerShell (global)"
+            shell_desc = "CMD (PowerShell kept at default)"
         elif shell_target == 'cmd':
             shells_to_apply = ['cmd']
             shell_desc = "CMD only"
@@ -3190,7 +3236,7 @@ def cmd_apply(args):
         for target_shell in shells_to_apply:
             handler.apply_theme(theme, opacity=opacity, shell=target_shell)
         
-        print(f"✓ Theme '{theme.name}' applied successfully to {shell_desc}!")
+        print(f"✓ Theme '{theme.name}' applied to {shell_desc}!")
         
         if opacity:
             print(f"  Opacity: {opacity}% (persistent)")
@@ -3568,6 +3614,65 @@ def cmd_status(args):
         print("Backup: Available (use 'restore' to revert)")
     else:
         print("Backup: None (will be created on first 'apply')")
+    
+    # Check original snapshot and warn if it matches a theme
+    if backup_manager.original_snapshot_exists():
+        matches, theme_name = backup_manager.check_snapshot_matches_theme()
+        if matches:
+            print()
+            print(f"⚠ WARNING: Original snapshot colors match '{theme_name}' theme")
+            print(f"  The snapshot may have been taken after a theme was applied.")
+            print(f"  Suggestion: Run 'restore --defaults' then 'snapshot --reset' to start fresh.")
+
+
+def cmd_snapshot(args):
+    """Handle snapshot command - manage original snapshot."""
+    backup_manager = BackupManager()
+    
+    if args.reset:
+        if backup_manager.original_snapshot_exists():
+            if backup_manager.reset_original_snapshot():
+                print("✓ Original snapshot deleted")
+                print("  A new snapshot will be created on the next 'apply' command")
+            else:
+                print("ERROR: Failed to delete original snapshot", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print("No original snapshot exists")
+    else:
+        # Show snapshot info
+        if backup_manager.original_snapshot_exists():
+            try:
+                with open(backup_manager.original_snapshot_file, 'r', encoding='utf-8') as f:
+                    snapshot = json.load(f)
+                
+                print("Original Snapshot:")
+                print()
+                
+                if snapshot.get('global_colors'):
+                    ct0 = snapshot['global_colors']['color_table'][0]
+                    print(f"  ColorTable00: 0x{ct0:08X}")
+                
+                print(f"  CMD per-exe key existed: {snapshot.get('cmd_key_existed', False)}")
+                
+                if snapshot.get('timestamp'):
+                    import datetime
+                    ts = datetime.datetime.fromtimestamp(snapshot['timestamp'])
+                    print(f"  Created: {ts.strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                # Check if it matches a theme
+                matches, theme_name = backup_manager.check_snapshot_matches_theme()
+                if matches:
+                    print()
+                    print(f"  ⚠ WARNING: Colors match '{theme_name}' theme")
+                    print(f"  The snapshot may have been taken after a theme was applied.")
+                    print(f"  Use 'snapshot --reset' to discard and start fresh.")
+            except Exception as e:
+                print(f"ERROR: Failed to read snapshot: {e}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print("No original snapshot exists")
+            print("A snapshot will be created automatically on the first 'apply' command")
 
 
 def cmd_undo(args):
@@ -3783,6 +3888,11 @@ def main():
     parser_status = subparsers.add_parser('status', help='Show current theme, opacity, blur and autoblur state')
     parser_status.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell', 'both'], help='Show status for specific shell (default: both)')
     parser_status.set_defaults(func=cmd_status)
+    
+    # Snapshot command
+    parser_snapshot = subparsers.add_parser('snapshot', help='Manage original snapshot')
+    parser_snapshot.add_argument('--reset', action='store_true', help='Delete the original snapshot (will be recreated on next apply)')
+    parser_snapshot.set_defaults(func=cmd_snapshot)
     
     # Undo command
     parser_undo = subparsers.add_parser('undo', help='Revert to previously applied theme')
