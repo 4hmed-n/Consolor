@@ -58,7 +58,7 @@ class ThemeGUI:
         
         self.root = tk.Tk()
         self.root.title(f"Consolor - v{__version__}")
-        self.root.geometry("700x850")
+        self.root.geometry("700x780")
         self.root.resizable(False, False)  # Disable resizing to prevent layout issues
         
         # Dark theme colors
@@ -129,11 +129,7 @@ class ThemeGUI:
         self.preview_canvas = tk.Canvas(main_frame, height=120, bg=self.widget_bg, highlightthickness=1, highlightbackground=self.fg_color)
         self.preview_canvas.pack(fill=tk.X, pady=(0, 4))
         
-        # Live preview checkbox
-        tk.Checkbutton(main_frame, text="Live preview on this window (apply glass effect to GUI)", 
-                      variable=self.live_preview_var, command=self.on_live_preview_changed,
-                      bg=self.bg_color, fg=self.fg_color,
-                      selectcolor=self.widget_bg, activebackground=self.bg_color, activeforeground=self.fg_color).pack(anchor="w", pady=(0, 10))
+        # Live preview checkbox - REMOVED (causes retro window styling issues)
         
         # Apply to selector
         apply_to_frame = tk.Frame(main_frame, bg=self.bg_color)

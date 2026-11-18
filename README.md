@@ -193,9 +193,9 @@ pyinstaller --onefile --add-data "src/themes;src/themes" --name cmd_theme cmd_th
 - Windows Terminal: Modifies `settings.json` with color scheme and opacity
 - Git Bash: Modifies `~/.minttyrc` with color settings
 - PowerShell 7: Auto-detects registry key location
-- Backup stored in `%LOCALAPPDATA%\cmd-theme-pack\backup.json`
-- History stored in `%LOCALAPPDATA%\cmd-theme-pack\history.json`
-- Per-shell blur settings in `%LOCALAPPDATA%\cmd-theme-pack\settings.json`
+- Backup stored in `%LOCALAPPDATA%\consolor\backup.json`
+- History stored in `%LOCALAPPDATA%\consolor\history.json`
+- Per-shell blur settings in `%LOCALAPPDATA%\consolor\settings.json`
 
 ## License
 
