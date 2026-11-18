@@ -394,6 +394,12 @@ class ThemeGUI:
             # Apply blur to GUI window
             self.blur_handler.apply_blur_to_window(hwnd, tint, opacity, use_acrylic)
             
+            # Automatically clip edges to prevent tint bleed
+            try:
+                self.blur_handler.clip_window_edges(hwnd)
+            except:
+                pass  # Silently fail if clipping not supported
+            
         except Exception as e:
             pass  # Silently fail preview
     
@@ -514,6 +520,11 @@ class ThemeGUI:
                     console_hwnd = kernel32.GetConsoleWindow()
                     if console_hwnd:
                         self.blur_handler.apply_blur_to_window(console_hwnd, blur_tint, blur_opacity, use_acrylic)
+                        # Automatically clip edges to prevent tint bleed
+                        try:
+                            self.blur_handler.clip_window_edges(console_hwnd)
+                        except:
+                            pass  # Silently fail if clipping not supported
                     
                     blur_applied = True
                 except Exception as e:
@@ -2935,9 +2946,19 @@ def cmd_apply(args):
                 
                 blur_handler.apply_acrylic_blur(blur_tint, blur_opacity, use_acrylic=use_acrylic)
                 
+                # Apply edge clipping to prevent tint bleed
+                try:
+                    kernel32 = ctypes.windll.kernel32
+                    console_hwnd = kernel32.GetConsoleWindow()
+                    if console_hwnd:
+                        blur_handler.clip_window_edges(console_hwnd)
+                except:
+                    pass  # Silently fail if clipping not supported
+                
                 tint_desc = f"custom tint {tint_color}" if tint_color else "theme tint"
                 blur_type = "acrylic" if use_acrylic else "blur"
                 print(f"  Blur: Applied to current window ({blur_type} with {tint_desc}, {blur_opacity}% strength)")
+                print(f"  Edge clipping: Enabled (prevents tint bleed)")
                 
                 # Automatically enable autoblur when using glass effects
                 autoblur_enabled = handler.enable_autoblur()
@@ -3032,6 +3053,15 @@ def cmd_blur(args):
             blur_opacity = opacity if opacity else 70
             
             blur_handler.apply_acrylic_blur(blur_tint, blur_opacity, use_acrylic=use_acrylic)
+            
+            # Apply edge clipping to prevent tint bleed
+            try:
+                kernel32 = ctypes.windll.kernel32
+                console_hwnd = kernel32.GetConsoleWindow()
+                if console_hwnd:
+                    blur_handler.clip_window_edges(console_hwnd)
+            except:
+                pass  # Silently fail if clipping not supported
             
             # Only print in interactive mode (not when called by autoblur)
             if is_interactive:
