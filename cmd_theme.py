@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""CMD Theme Pack - Manage and apply CMD color themes (Python Edition)
+"""Consolor - Manage and apply color themes to Windows terminals
 
-A command-line utility for managing and applying color schemes to Windows Command Prompt.
+A command-line utility for managing and applying color schemes to Windows Command Prompt,
+PowerShell, Windows Terminal, and Git Bash.
 Uses only Python standard library (winreg, json, argparse, ctypes).
 """
 
@@ -56,7 +57,7 @@ class ThemeGUI:
             sys.exit(1)
         
         self.root = tk.Tk()
-        self.root.title(f"CMD Theme Pack - v{__version__}")
+        self.root.title(f"Consolor - v{__version__}")
         self.root.geometry("700x850")
         self.root.resizable(False, False)  # Disable resizing to prevent layout issues
         
@@ -343,7 +344,7 @@ class ThemeGUI:
         # Draw sample colored text
         y_offset = 20
         sample_texts = [
-            ("CMD Theme Pack", theme.colors['white'], 14, "bold"),
+            ("Consolor", theme.colors['white'], 14, "bold"),
             ("C:\\> dir", theme.colors['foreground'], 11, "normal"),
             ("File not found", theme.colors['red'], 10, "normal"),
             ("Operation successful", theme.colors['green'], 10, "normal"),
@@ -670,7 +671,7 @@ def cmd_tune(args):
         print("ERROR: tune command not available (msvcrt not found)", file=sys.stderr)
         sys.exit(1)
     
-    print("CMD Theme Pack - Live Tune Mode")
+    print("Consolor - Live Tune Mode")
     print("=" * 50)
     print()
     print("Controls:")
@@ -739,7 +740,7 @@ def cmd_tune(args):
     def display_state():
         """Display current state."""
         os.system('cls' if os.name == 'nt' else 'clear')
-        print("CMD Theme Pack - Live Tune Mode")
+        print("Consolor - Live Tune Mode")
         print("=" * 50)
         print()
         print(f"Theme: {current_theme.name}")
@@ -1226,7 +1227,7 @@ class GitBashHandler:
                 for line in existing_config:
                     f.write(line + '\n')
                 # Write color settings
-                f.write('\n# CMD Theme Pack colors\n')
+                f.write('\n# Consolor colors\n')
                 for line in color_config:
                     f.write(line + '\n')
             
@@ -3436,11 +3437,11 @@ def main():
     
     parser = argparse.ArgumentParser(
         prog='cmd_theme.py',
-        description='CMD Theme Pack - Manage and apply CMD color themes'
+        description='Consolor - Manage and apply color themes to Windows terminals'
     )
     
     # Add version flag
-    parser.add_argument('--version', action='version', version=f'CMD Theme Pack v{__version__}')
+    parser.add_argument('--version', action='version', version=f'Consolor v{__version__}')
     
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
