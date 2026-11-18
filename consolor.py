@@ -2179,11 +2179,62 @@ class BackupManager:
         self.backup_file = self.backup_dir / 'backup.json'
         self.history_file = self.backup_dir / 'history.json'
         self.settings_file = self.backup_dir / 'settings.json'
+        self.original_snapshot_file = self.backup_dir / 'original_snapshot.json'
         self.backup_dir.mkdir(parents=True, exist_ok=True)
     
     def backup_exists(self):
         """Check if a backup exists."""
         return self.backup_file.exists()
+    
+    def original_snapshot_exists(self):
+        """Check if original snapshot exists."""
+        return self.original_snapshot_file.exists()
+    
+    def save_original_snapshot(self):
+        """Save original state of global HKCU\\Console before any theme is applied.
+        This is saved ONCE and never overwritten."""
+        if self.original_snapshot_exists():
+            return  # Already saved, don't overwrite
+        
+        handler = RegistryHandler()
+        snapshot = {}
+        
+        try:
+            # Save global console key colors
+            try:
+                colors = handler.read_current_colors(shell=None)
+                snapshot['global_colors'] = colors
+            except:
+                snapshot['global_colors'] = None
+            
+            # Save global opacity
+            try:
+                opacity = handler.get_opacity(shell=None)
+                snapshot['global_opacity'] = opacity
+            except:
+                snapshot['global_opacity'] = None
+            
+            # Check if CMD per-exe key existed
+            try:
+                key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    handler.CMD_CONSOLE_KEY,
+                    0,
+                    winreg.KEY_READ
+                )
+                winreg.CloseKey(key)
+                snapshot['cmd_key_existed'] = True
+            except:
+                snapshot['cmd_key_existed'] = False
+            
+            # Save timestamp
+            snapshot['timestamp'] = time.time()
+            
+            with open(self.original_snapshot_file, 'w', encoding='utf-8') as f:
+                json.dump(snapshot, f, indent=2)
+        except Exception as e:
+            # Don't fail - just log
+            pass
     
     def save_blur_settings(self, tint=None, opacity=None, theme_background=None, use_acrylic=False, shell='cmd'):
         """Save blur settings for autoblur to use.
@@ -2337,6 +2388,9 @@ class BackupManager:
     
     def create_backup(self):
         """Create a backup of current console settings."""
+        # Save original snapshot if this is the first time
+        self.save_original_snapshot()
+        
         handler = RegistryHandler()
         backup_data = {}
         
@@ -2481,46 +2535,60 @@ class BackupManager:
                     print("Note: New text will use the restored colors. Close and reopen for full reset.")
                     return
                 
-                # Restore CMD from backup
-                if 'shells' in backup and shell in backup['shells']:
-                    shell_data = backup['shells'][shell]
-                    shell_key_path = handler.get_console_key_path(shell)
+                # Restore CMD - use original snapshot
+                if shell == 'cmd':
+                    if not self.original_snapshot_exists():
+                        print("⚠ No original snapshot found (older installation)")
+                        print("Use 'restore --defaults' to delete global console values and use Windows defaults.")
+                        return
                     
-                    try:
-                        key = winreg.CreateKeyEx(
-                            winreg.HKEY_CURRENT_USER,
-                            shell_key_path,
-                            0,
-                            winreg.KEY_WRITE
-                        )
-                        
+                    # Load original snapshot
+                    with open(self.original_snapshot_file, 'r', encoding='utf-8') as f:
+                        snapshot = json.load(f)
+                    
+                    # Restore global console key from original snapshot
+                    if snapshot['global_colors']:
                         try:
-                            # Restore colors if present
-                            if 'colors' in shell_data:
-                                colors = shell_data['colors']
+                            key = winreg.CreateKeyEx(
+                                winreg.HKEY_CURRENT_USER,
+                                handler.CONSOLE_KEY_PATH,
+                                0,
+                                winreg.KEY_WRITE
+                            )
+                            
+                            try:
+                                colors = snapshot['global_colors']
                                 for i, color in enumerate(colors['color_table']):
                                     key_name = f"ColorTable{i:02d}"
                                     winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, color)
                                 
                                 winreg.SetValueEx(key, "ScreenColors", 0, winreg.REG_DWORD, colors['screen_colors'])
-                            
-                            # Restore opacity if present
-                            if 'opacity' in shell_data:
-                                window_alpha = handler._opacity_to_window_alpha(shell_data['opacity'])
-                                winreg.SetValueEx(key, "WindowAlpha", 0, winreg.REG_DWORD, window_alpha)
-                            else:
-                                # Remove WindowAlpha if it wasn't in backup
-                                try:
-                                    winreg.DeleteValue(key, "WindowAlpha")
-                                except FileNotFoundError:
-                                    pass
-                        finally:
-                            winreg.CloseKey(key)
-                    except Exception as e:
-                        raise Exception(f"Failed to restore {shell} settings: {e}")
+                                
+                                # Restore opacity if it was set
+                                if snapshot['global_opacity'] is not None:
+                                    window_alpha = handler._opacity_to_window_alpha(snapshot['global_opacity'])
+                                    winreg.SetValueEx(key, "WindowAlpha", 0, winreg.REG_DWORD, window_alpha)
+                                else:
+                                    try:
+                                        winreg.DeleteValue(key, "WindowAlpha")
+                                    except FileNotFoundError:
+                                        pass
+                            finally:
+                                winreg.CloseKey(key)
+                        except Exception as e:
+                            print(f"⚠ Failed to restore global console key: {e}")
                     
-                    # Clear blur settings for this shell
-                    self.clear_blur_settings(shell=shell)
+                    # Delete CMD per-exe key if it didn't exist originally
+                    if not snapshot['cmd_key_existed']:
+                        try:
+                            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, handler.CMD_CONSOLE_KEY)
+                        except FileNotFoundError:
+                            pass  # Already doesn't exist
+                        except Exception as e:
+                            print(f"⚠ Failed to delete CMD per-exe key: {e}")
+                    
+                    # Clear blur settings
+                    self.clear_blur_settings(shell='cmd')
                     
                     # Remove blur from current window
                     blur_removed = False
@@ -2529,9 +2597,8 @@ class BackupManager:
                         kernel32 = ctypes.windll.kernel32
                         console_hwnd = kernel32.GetConsoleWindow()
                         if console_hwnd:
-                            # Disable blur
                             accent = blur.ACCENT_POLICY()
-                            accent.AccentState = 0  # ACCENT_DISABLED
+                            accent.AccentState = 0
                             accent.AccentFlags = 0
                             accent.GradientColor = 0
                             accent.AnimationId = 0
@@ -2547,16 +2614,33 @@ class BackupManager:
                     except:
                         pass
                     
-                    shell_name = "CMD"
-                    print(f"✓ {shell_name} settings restored successfully!")
-                    if blur_removed:
-                        print("✓ Blur removed from current window")
-                    print()
-                    # Force console to repaint with new colors by printing a space and clearing it
-                    print(" ", end="\r")
-                    print(f"Note: New text will use the restored colors. Close and reopen for full reset.")
-                else:
-                    print(f"No backup found for CMD")
+                    # Verify restoration by re-reading registry
+                    try:
+                        current_colors = handler.read_current_colors(shell=None)
+                        original_colors = snapshot['global_colors']
+                        
+                        # Compare ColorTable00
+                        if current_colors['color_table'][0] == original_colors['color_table'][0]:
+                            print("✓ CMD settings restored successfully!")
+                            if blur_removed:
+                                print("✓ Blur removed from current window")
+                            print()
+                            print(f"Note: ColorTable00 = {hex(current_colors['color_table'][0])}")
+                            print("Close and reopen CMD to see the original colors.")
+                        else:
+                            print("⚠ CMD restore completed but verification failed")
+                            print(f"Expected ColorTable00: {hex(original_colors['color_table'][0])}")
+                            print(f"Current ColorTable00:  {hex(current_colors['color_table'][0])}")
+                    except:
+                        print("✓ CMD settings restored")
+                        if blur_removed:
+                            print("✓ Blur removed from current window")
+                    
+                    return
+                    except:
+                        pass
+                    
+                    return
                 
                 return
             
