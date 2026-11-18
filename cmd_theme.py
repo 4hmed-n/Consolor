@@ -747,16 +747,58 @@ class RegistryHandler:
     CONSOLE_KEY_PATH = r"Console"
     AUTORUN_KEY_PATH = r"Software\Microsoft\Command Processor"
     
+    # Per-shell registry paths
+    CMD_CONSOLE_KEY = r"Console\%SystemRoot%_system32_cmd.exe"
+    POWERSHELL_CONSOLE_KEY = r"Console\%SystemRoot%_System32_WindowsPowerShell_v1.0_powershell.exe"
+    
     def __init__(self):
         pass
     
-    def apply_theme(self, theme, opacity=None):
-        """Apply a theme to the legacy console by modifying registry."""
+    def get_console_key_path(self, shell=None):
+        """Get the appropriate console registry key path for the shell.
+        
+        Args:
+            shell: 'cmd', 'powershell', or None (global)
+        
+        Returns:
+            Registry key path string
+        """
+        if shell == 'cmd':
+            return self.CMD_CONSOLE_KEY
+        elif shell == 'powershell':
+            return self.POWERSHELL_CONSOLE_KEY
+        else:
+            return self.CONSOLE_KEY_PATH
+    
+    def apply_theme(self, theme, opacity=None, shell=None):
+        """Apply a theme to the console by modifying registry.
+        
+        Args:
+            theme: Theme object
+            opacity: Optional opacity percentage
+            shell: 'cmd', 'powershell', or None (both/global)
+        """
+        shells_to_apply = []
+        if shell == 'cmd':
+            shells_to_apply = ['cmd']
+        elif shell == 'powershell':
+            shells_to_apply = ['powershell']
+        else:
+            # Both: apply to global key (affects both)
+            shells_to_apply = [None]
+        
+        for target_shell in shells_to_apply:
+            self._apply_theme_to_shell(theme, opacity, target_shell)
+    
+    def _apply_theme_to_shell(self, theme, opacity, shell):
+        """Apply theme to a specific shell or global."""
         try:
-            # Open HKEY_CURRENT_USER\Console with write permissions
-            key = winreg.OpenKey(
+            key_path = self.get_console_key_path(shell)
+            
+            # Create or open key with write permissions
+            key = winreg.CreateKeyEx(
                 winreg.HKEY_CURRENT_USER,
-                self.CONSOLE_KEY_PATH,
+                key_path,
                 0,
                 winreg.KEY_WRITE
             )
@@ -766,7 +808,6 @@ class RegistryHandler:
                 self._write_color_table(key, theme.colors)
                 
                 # Write ScreenColors value (background in high nibble, foreground in low nibble)
-                # Use black background (index 0) and white foreground (index 7)
                 screen_colors = (0 << 4) | 7  # 0x07
                 winreg.SetValueEx(key, "ScreenColors", 0, winreg.REG_DWORD, screen_colors)
                 
@@ -821,12 +862,17 @@ class RegistryHandler:
         # Convert to BGR DWORD format for Windows registry
         return (b << 16) | (g << 8) | r
     
-    def read_current_colors(self):
-        """Read current console colors from registry."""
+    def read_current_colors(self, shell=None):
+        """Read current console colors from registry.
+        
+        Args:
+            shell: 'cmd', 'powershell', or None (global)
+        """
         try:
+            key_path = self.get_console_key_path(shell)
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
-                self.CONSOLE_KEY_PATH,
+                key_path,
                 0,
                 winreg.KEY_READ
             )
@@ -871,12 +917,18 @@ class RegistryHandler:
         alpha = round(opacity * 255 / 100)
         return max(77, min(255, alpha))
     
-    def set_opacity(self, opacity):
-        """Set console opacity via WindowAlpha registry value."""
+    def set_opacity(self, opacity, shell=None):
+        """Set console opacity via WindowAlpha registry value.
+        
+        Args:
+            opacity: Opacity percentage (30-100)
+            shell: 'cmd', 'powershell', or None (global)
+        """
         try:
-            key = winreg.OpenKey(
+            key_path = self.get_console_key_path(shell)
+            key = winreg.CreateKeyEx(
                 winreg.HKEY_CURRENT_USER,
-                self.CONSOLE_KEY_PATH,
+                key_path,
                 0,
                 winreg.KEY_WRITE
             )
@@ -888,12 +940,17 @@ class RegistryHandler:
         except Exception as e:
             raise Exception(f"Failed to set opacity: {e}")
     
-    def get_opacity(self):
-        """Get current console opacity from WindowAlpha registry value."""
+    def get_opacity(self, shell=None):
+        """Get current console opacity from WindowAlpha registry value.
+        
+        Args:
+            shell: 'cmd', 'powershell', or None (global)
+        """
         try:
+            key_path = self.get_console_key_path(shell)
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
-                self.CONSOLE_KEY_PATH,
+                key_path,
                 0,
                 winreg.KEY_READ
             )
@@ -1086,9 +1143,12 @@ class BlurHandler:
         self.SetWindowRgn.restype = ctypes.c_int
         
         # CreateRectRgn
-        self.CreateRectRgn = self.user32.CreateRectRgn
-        self.CreateRectRgn.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
-        self.CreateRectRgn.restype = wintypes.HRGN
+        try:
+            self.CreateRectRgn = ctypes.windll.gdi32.CreateRectRgn
+            self.CreateRectRgn.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+            self.CreateRectRgn.restype = wintypes.HRGN
+        except AttributeError:
+            self.CreateRectRgn = None
     
     def parse_tint_color(self, color_input):
         """Parse tint color from hex or color name."""
@@ -1232,7 +1292,7 @@ class BlurHandler:
     
     def clip_window_edges(self, hwnd):
         """Clip window to visible frame bounds to prevent edge bleed."""
-        if not self.DwmGetWindowAttribute:
+        if not self.DwmGetWindowAttribute or not self.CreateRectRgn:
             return False
         
         try:
@@ -1295,36 +1355,96 @@ class BackupManager:
         """Check if a backup exists."""
         return self.backup_file.exists()
     
-    def save_blur_settings(self, tint=None, opacity=None, theme_background=None, use_acrylic=False):
-        """Save blur settings for autoblur to use."""
+    def save_blur_settings(self, tint=None, opacity=None, theme_background=None, use_acrylic=False, shell='cmd'):
+        """Save blur settings for autoblur to use.
+        
+        Args:
+            tint: Custom tint color or None
+            opacity: Tint opacity percentage
+            theme_background: Theme's background color
+            use_acrylic: Whether to use acrylic mode
+            shell: 'cmd', 'powershell', or 'both'
+        """
         try:
-            settings = {
+            # Load existing settings
+            settings = {}
+            if self.settings_file.exists():
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+            
+            # Ensure settings has the per-shell structure
+            if not isinstance(settings, dict) or 'cmd' not in settings:
+                settings = {'cmd': {}, 'powershell': {}}
+            
+            # Update settings for the specified shell(s)
+            shell_settings = {
                 'tint': tint,
                 'opacity': opacity,
                 'theme_background': theme_background,
                 'use_acrylic': use_acrylic
             }
+            
+            if shell == 'both':
+                settings['cmd'] = shell_settings.copy()
+                settings['powershell'] = shell_settings.copy()
+            else:
+                settings[shell] = shell_settings
+            
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=2)
         except Exception as e:
             # Don't fail if settings can't be saved
             pass
     
-    def load_blur_settings(self):
-        """Load saved blur settings."""
+    def load_blur_settings(self, shell='cmd'):
+        """Load saved blur settings for a specific shell.
+        
+        Args:
+            shell: 'cmd' or 'powershell'
+        
+        Returns:
+            Dict with blur settings or None
+        """
         try:
             if self.settings_file.exists():
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    settings = json.load(f)
+                    # Handle both old format (dict at root) and new format (per-shell)
+                    if isinstance(settings, dict):
+                        if shell in settings:
+                            return settings[shell]
+                        elif 'tint' in settings:
+                            # Old format - return as-is
+                            return settings
+                    return None
         except:
             pass
         return None
     
-    def clear_blur_settings(self):
-        """Clear saved blur settings."""
+    def clear_blur_settings(self, shell=None):
+        """Clear saved blur settings.
+        
+        Args:
+            shell: 'cmd', 'powershell', or None (clear all)
+        """
         try:
-            if self.settings_file.exists():
-                self.settings_file.unlink()
+            if shell is None:
+                # Clear all
+                if self.settings_file.exists():
+                    self.settings_file.unlink()
+            else:
+                # Clear specific shell
+                if self.settings_file.exists():
+                    with open(self.settings_file, 'r', encoding='utf-8') as f:
+                        settings = json.load(f)
+                    if shell in settings:
+                        del settings[shell]
+                        if not settings or (not settings.get('cmd') and not settings.get('powershell')):
+                            # No settings left, delete file
+                            self.settings_file.unlink()
+                        else:
+                            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                                json.dump(settings, f, indent=2)
         except:
             pass
     
@@ -1391,12 +1511,35 @@ class BackupManager:
         backup_data = {}
         
         try:
-            # Backup color settings
-            colors = handler.read_current_colors()
-            backup_data['colors'] = colors
+            # Backup global console colors
+            colors = handler.read_current_colors(shell=None)
+            backup_data['global_colors'] = colors
             
-            # Backup opacity
-            opacity = handler.get_opacity()
+            # Backup per-shell settings
+            backup_data['shells'] = {}
+            for shell in ['cmd', 'powershell']:
+                try:
+                    shell_data = {}
+                    
+                    # Try to read per-shell colors
+                    try:
+                        shell_colors = handler.read_current_colors(shell=shell)
+                        shell_data['colors'] = shell_colors
+                    except:
+                        pass
+                    
+                    # Try to read per-shell opacity
+                    opacity = handler.get_opacity(shell=shell)
+                    if opacity is not None:
+                        shell_data['opacity'] = opacity
+                    
+                    if shell_data:
+                        backup_data['shells'][shell] = shell_data
+                except:
+                    pass
+            
+            # Backup global opacity
+            opacity = handler.get_opacity(shell=None)
             if opacity is not None:
                 backup_data['opacity'] = opacity
             
@@ -1428,9 +1571,9 @@ class BackupManager:
             
             handler = RegistryHandler()
             
-            # Restore colors if present
-            if 'colors' in backup:
-                colors = backup['colors']
+            # Restore global colors if present
+            if 'global_colors' in backup:
+                colors = backup['global_colors']
                 key = winreg.OpenKey(
                     winreg.HKEY_CURRENT_USER,
                     RegistryHandler.CONSOLE_KEY_PATH,
@@ -1448,10 +1591,60 @@ class BackupManager:
                     winreg.SetValueEx(key, "ScreenColors", 0, winreg.REG_DWORD, colors['screen_colors'])
                 finally:
                     winreg.CloseKey(key)
+            # Backward compatibility: 'colors' key for old backups
+            elif 'colors' in backup:
+                colors = backup['colors']
+                key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    RegistryHandler.CONSOLE_KEY_PATH,
+                    0,
+                    winreg.KEY_WRITE
+                )
+                
+                try:
+                    for i, color in enumerate(colors['color_table']):
+                        key_name = f"ColorTable{i:02d}"
+                        winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, color)
+                    
+                    winreg.SetValueEx(key, "ScreenColors", 0, winreg.REG_DWORD, colors['screen_colors'])
+                finally:
+                    winreg.CloseKey(key)
             
-            # Restore opacity if present
+            # Restore per-shell settings
+            if 'shells' in backup:
+                for shell, shell_data in backup['shells'].items():
+                    shell_key_path = handler.get_console_key_path(shell)
+                    
+                    try:
+                        key = winreg.CreateKeyEx(
+                            winreg.HKEY_CURRENT_USER,
+                            shell_key_path,
+                            0,
+                            winreg.KEY_WRITE
+                        )
+                        
+                        try:
+                            # Restore colors if present
+                            if 'colors' in shell_data:
+                                colors = shell_data['colors']
+                                for i, color in enumerate(colors['color_table']):
+                                    key_name = f"ColorTable{i:02d}"
+                                    winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, color)
+                                
+                                winreg.SetValueEx(key, "ScreenColors", 0, winreg.REG_DWORD, colors['screen_colors'])
+                            
+                            # Restore opacity if present
+                            if 'opacity' in shell_data:
+                                window_alpha = handler._opacity_to_window_alpha(shell_data['opacity'])
+                                winreg.SetValueEx(key, "WindowAlpha", 0, winreg.REG_DWORD, window_alpha)
+                        finally:
+                            winreg.CloseKey(key)
+                    except:
+                        pass
+            
+            # Restore global opacity if present
             if 'opacity' in backup:
-                handler.set_opacity(backup['opacity'])
+                handler.set_opacity(backup['opacity'], shell=None)
             else:
                 # Remove WindowAlpha if it wasn't in backup
                 try:
@@ -1646,6 +1839,9 @@ def cmd_apply(args):
                 print(f"  - {t.name}", file=sys.stderr)
             sys.exit(1)
     
+    # Get the shell target
+    shell_target = getattr(args, 'for_shell', 'both')
+    
     # Parse tint color if specified
     tint_color = None
     if args.tint:
@@ -1675,9 +1871,6 @@ def cmd_apply(args):
     backup_manager = BackupManager()
     
     # Determine if we should reset effects or keep them
-    # Reset to solid (100%, no blur, no tint) unless:
-    # 1. User specified --opacity, --blur, --glass, --tint, or --acrylic
-    # 2. User specified --keep-effects
     user_specified_effects = args.opacity is not None or args.blur or args.glass or args.tint or use_acrylic
     keep_effects = args.keep_effects
     
@@ -1686,8 +1879,12 @@ def cmd_apply(args):
         opacity = 100
         blur = False
         tint_color = None
-        # Clear saved blur settings
-        backup_manager.clear_blur_settings()
+        # Clear saved blur settings for the target shell(s)
+        if shell_target == 'both':
+            backup_manager.clear_blur_settings(shell='cmd')
+            backup_manager.clear_blur_settings(shell='powershell')
+        else:
+            backup_manager.clear_blur_settings(shell=shell_target)
     
     # Create backup if it doesn't exist
     if not backup_manager.backup_exists():
@@ -1704,7 +1901,7 @@ def cmd_apply(args):
     is_windows_terminal = wt_handler.is_available()
     
     if is_windows_terminal:
-        # Windows Terminal mode
+        # Windows Terminal mode - ignore --for flag (not applicable)
         try:
             # Apply opacity and blur to Windows Terminal
             if opacity is not None or blur:
@@ -1717,6 +1914,8 @@ def cmd_apply(args):
                 print(f"  Blur: Enabled (acrylic)")
             if tint_color:
                 print(f"  Note: Custom tint ({tint_color}) only applies to legacy CMD blur")
+            if shell_target != 'both':
+                print(f"  Note: --for {shell_target} flag ignored (Windows Terminal uses global settings)")
             print()
             print("Restart Windows Terminal or open a new tab to see the changes.")
             
@@ -1726,10 +1925,25 @@ def cmd_apply(args):
             print(f"ERROR: Failed to configure Windows Terminal: {e}", file=sys.stderr)
             sys.exit(1)
     else:
-        # Legacy Console mode
+        # Legacy Console mode - apply per-shell settings
         try:
-            handler.apply_theme(theme, opacity=opacity)
-            print(f"✓ Theme '{theme.name}' applied successfully to Legacy Console!")
+            # Determine which shell(s) to apply to
+            shells_to_apply = []
+            if shell_target == 'both':
+                shells_to_apply = [None]  # Apply to global key
+                shell_desc = "both CMD and PowerShell (global)"
+            elif shell_target == 'cmd':
+                shells_to_apply = ['cmd']
+                shell_desc = "CMD only"
+            elif shell_target == 'powershell':
+                shells_to_apply = ['powershell']
+                shell_desc = "PowerShell only"
+            
+            # Apply theme to each target shell
+            for target_shell in shells_to_apply:
+                handler.apply_theme(theme, opacity=opacity, shell=target_shell)
+            
+            print(f"✓ Theme '{theme.name}' applied successfully to {shell_desc}!")
             
             if opacity:
                 print(f"  Opacity: {opacity}% (persistent)")
@@ -1742,17 +1956,28 @@ def cmd_apply(args):
                     blur_tint = tint_color if tint_color else theme.colors['background']
                     blur_opacity = opacity if opacity else 70  # Default to 70% for blur
                     
-                    # Save blur settings for autoblur to use
-                    backup_manager.save_blur_settings(
-                        tint=tint_color,
-                        opacity=opacity,
-                        theme_background=theme.colors['background'],
-                        use_acrylic=use_acrylic
-                    )
+                    # Save blur settings for autoblur to use (for each target shell)
+                    if shell_target == 'both':
+                        backup_manager.save_blur_settings(
+                            tint=tint_color,
+                            opacity=opacity,
+                            theme_background=theme.colors['background'],
+                            use_acrylic=use_acrylic,
+                            shell='both'
+                        )
+                    else:
+                        backup_manager.save_blur_settings(
+                            tint=tint_color,
+                            opacity=opacity,
+                            theme_background=theme.colors['background'],
+                            use_acrylic=use_acrylic,
+                            shell=shell_target
+                        )
                     
                     # Set minimum opacity of 60% in WindowAlpha for glass to show through
                     if opacity and opacity < 60:
-                        handler.set_opacity(60)
+                        for target_shell in shells_to_apply:
+                            handler.set_opacity(60, shell=target_shell)
                         print(f"  Window opacity set to 60% (minimum for glass effect)")
                     
                     blur_handler.apply_acrylic_blur(blur_tint, blur_opacity, use_acrylic=use_acrylic)
@@ -1772,13 +1997,22 @@ def cmd_apply(args):
             else:
                 # No blur requested - clear saved blur settings and disable autoblur if not keeping effects
                 if not keep_effects:
-                    backup_manager.clear_blur_settings()
+                    if shell_target == 'both':
+                        backup_manager.clear_blur_settings(shell='cmd')
+                        backup_manager.clear_blur_settings(shell='powershell')
+                    else:
+                        backup_manager.clear_blur_settings(shell=shell_target)
                     autoblur_disabled = handler.disable_autoblur()
                     if autoblur_disabled:
                         print(f"  Autoblur: Disabled")
             
             print()
-            print("Open a new Command Prompt window to see the changes.")
+            if shell_target == 'cmd':
+                print("Open a new Command Prompt (CMD) window to see the changes.")
+            elif shell_target == 'powershell':
+                print("Open a new PowerShell window to see the changes.")
+            else:
+                print("Open a new Command Prompt window to see the changes.")
             
             # Save to history AFTER successful apply
             backup_manager.save_state_before_apply(theme.name, opacity, blur, tint_color)
@@ -1818,11 +2052,14 @@ def cmd_blur(args):
         # Autoblur should be silent - don't print messages
         is_interactive = sys.stdout.isatty()
         
+        # Determine which shell we're in (default to cmd)
+        shell = getattr(args, 'shell', 'cmd')
+        
         backup_manager = BackupManager()
         blur_handler = BlurHandler()
         
-        # Load saved blur settings
-        settings = backup_manager.load_blur_settings()
+        # Load saved blur settings for the appropriate shell
+        settings = backup_manager.load_blur_settings(shell=shell)
         
         if settings:
             # Use saved tint if available, otherwise use saved theme background
@@ -1926,6 +2163,9 @@ def cmd_status(args):
     wt_handler = WindowsTerminalHandler()
     backup_manager = BackupManager()
     
+    # Get the shell target if specified
+    shell_target = getattr(args, 'for_shell', None)
+    
     print("Current Console Settings:")
     print()
     
@@ -1966,30 +2206,72 @@ def cmd_status(args):
         else:
             print("  Could not read Windows Terminal settings")
     else:
-        print("Console Type: Legacy Console (CMD)")
+        print("Console Type: Legacy Console (CMD/PowerShell)")
         print()
         
-        # Get opacity
-        opacity = handler.get_opacity()
-        if opacity:
-            print(f"  Opacity: {opacity}%")
+        # Show settings for specified shell or both
+        if shell_target and shell_target != 'both':
+            # Show specific shell
+            shell_name = "CMD" if shell_target == 'cmd' else "PowerShell"
+            print(f"Settings for {shell_name}:")
+            print()
+            
+            opacity = handler.get_opacity(shell=shell_target)
+            if opacity:
+                print(f"  Opacity: {opacity}%")
+            else:
+                print(f"  Opacity: 100% (default)")
+            
+            # Show blur settings for this shell
+            blur_settings = backup_manager.load_blur_settings(shell=shell_target)
+            if blur_settings:
+                tint = blur_settings.get('tint')
+                if tint:
+                    print(f"  Tint: {tint}")
+                use_acrylic = blur_settings.get('use_acrylic', False)
+                blur_mode = "acrylic" if use_acrylic else "blur"
+                print(f"  Blur mode: {blur_mode}")
         else:
-            print(f"  Opacity: 100% (default)")
+            # Show both shells
+            for shell, shell_name in [('cmd', 'CMD'), ('powershell', 'PowerShell')]:
+                print(f"Settings for {shell_name}:")
+                print()
+                
+                opacity = handler.get_opacity(shell=shell)
+                if opacity:
+                    print(f"  Opacity: {opacity}%")
+                else:
+                    # Try global
+                    global_opacity = handler.get_opacity(shell=None)
+                    if global_opacity:
+                        print(f"  Opacity: {global_opacity}% (from global)")
+                    else:
+                        print(f"  Opacity: 100% (default)")
+                
+                # Show blur settings for this shell
+                blur_settings = backup_manager.load_blur_settings(shell=shell)
+                if blur_settings:
+                    tint = blur_settings.get('tint')
+                    if tint:
+                        print(f"  Tint: {tint}")
+                    use_acrylic = blur_settings.get('use_acrylic', False)
+                    blur_mode = "acrylic" if use_acrylic else "blur"
+                    print(f"  Blur mode: {blur_mode}")
+                else:
+                    print(f"  Blur: Not configured")
+                
+                print()
         
-        # Show tint from last state
-        if last_state and last_state.get('tint'):
-            print(f"  Tint: {last_state['tint']}")
-        
-        # Check autoblur
+        # Check autoblur (global setting)
         is_autoblur = handler.is_autoblur_enabled()
         if is_autoblur:
-            print(f"  Autoblur: Enabled")
+            print(f"Autoblur: Enabled (applies to CMD)")
         else:
-            print(f"  Autoblur: Disabled")
+            print(f"Autoblur: Disabled")
         
         print()
-        print("  Note: Blur for legacy console is applied per-window via 'blur' command")
-        print("        or automatically with 'autoblur on'")
+        print("Note: Blur for legacy console is applied per-window via 'blur' command")
+        print("      or automatically with autoblur enabled")
     
     print()
     
@@ -2166,6 +2448,7 @@ def main():
     parser_apply.add_argument('--tint', metavar='COLOR', help='Custom tint color (hex #RRGGBB or name: red, blue, green, purple, pink, orange, cyan, yellow, teal, white, black). Implies --blur.')
     parser_apply.add_argument('--acrylic', action='store_true', help='Use acrylic blur (state 4) instead of regular blur. WARNING: Causes drag lag on Windows 10.')
     parser_apply.add_argument('--keep-effects', action='store_true', help='Keep current opacity and blur settings')
+    parser_apply.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell', 'both'], default='both', help='Apply to CMD, PowerShell, or both (default: both). Only applies to legacy console.')
     parser_apply.set_defaults(func=cmd_apply)
     
     # Restore command
@@ -2174,6 +2457,7 @@ def main():
     
     # Blur command
     parser_blur = subparsers.add_parser('blur', help='Apply blur to current console window (legacy CMD only)')
+    parser_blur.add_argument('--shell', choices=['cmd', 'powershell'], default='cmd', help='Which shell settings to use (default: cmd)')
     parser_blur.set_defaults(func=cmd_blur)
     
     # Autoblur command
@@ -2183,6 +2467,7 @@ def main():
     
     # Status command
     parser_status = subparsers.add_parser('status', help='Show current theme, opacity, blur and autoblur state')
+    parser_status.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell', 'both'], help='Show status for specific shell (default: both)')
     parser_status.set_defaults(func=cmd_status)
     
     # Undo command
