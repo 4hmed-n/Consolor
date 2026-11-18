@@ -137,9 +137,12 @@ class ThemeGUI:
         
         # Determine available shells
         wt_handler = WindowsTerminalHandler()
+        gitbash_handler = GitBashHandler()
         shell_options = ["CMD", "PowerShell", "Both"]
         if wt_handler.is_available():
             shell_options.append("Windows Terminal")
+        if gitbash_handler.is_available():
+            shell_options.append("Git Bash")
         
         for shell_name in shell_options:
             tk.Radiobutton(apply_to_frame, text=shell_name, variable=self.shell_selector_var, value=shell_name,
@@ -441,6 +444,23 @@ class ThemeGUI:
                     self.status_label.config(text=f"ERROR: {e}", fg="#ff0000")
                     return
             
+            # Git Bash handling
+            if shell_selection == "Git Bash":
+                gitbash_handler = GitBashHandler()
+                if not gitbash_handler.is_available():
+                    self.status_label.config(text="ERROR: Git Bash not found", fg="#ff0000")
+                    return
+                
+                try:
+                    gitbash_handler.apply_theme(theme)
+                    
+                    self.status_label.config(text=f"✓ Applied: {theme.name} to Git Bash", fg="#00ff00")
+                    backup_manager.save_state_before_apply(theme.name, opacity, False, self.tint_color)
+                    return
+                except Exception as e:
+                    self.status_label.config(text=f"ERROR: {e}", fg="#ff0000")
+                    return
+            
             # Legacy console handling (CMD/PowerShell/Both)
             shell_param = None
             if shell_selection == "CMD":
@@ -533,6 +553,18 @@ class ThemeGUI:
                         self.status_label.config(text="No Windows Terminal backup found", fg="#ffaa00")
                 else:
                     self.status_label.config(text="ERROR: Windows Terminal not found", fg="#ff0000")
+                return
+            
+            # Git Bash handling
+            if shell_selection == "Git Bash":
+                gitbash_handler = GitBashHandler()
+                if gitbash_handler.is_available():
+                    if gitbash_handler.restore_backup():
+                        self.status_label.config(text="✓ Restored Git Bash from backup", fg="#00ff00")
+                    else:
+                        self.status_label.config(text="No Git Bash backup found", fg="#ffaa00")
+                else:
+                    self.status_label.config(text="ERROR: Git Bash not found", fg="#ff0000")
                 return
             
             # Legacy console handling
@@ -869,6 +901,320 @@ class ThemeLoader:
 
 
 class WindowsTerminalHandler:
+    """Handles Windows Terminal settings.json modifications."""
+    
+    def __init__(self):
+        self.settings_path = self._find_settings_path()
+        self.backup_manager = None
+    
+    def _find_settings_path(self):
+        """Find Windows Terminal settings.json path in multiple locations."""
+        local_appdata = Path(os.environ.get('LOCALAPPDATA', ''))
+        
+        # Try multiple locations in order of preference
+        search_paths = [
+            # Stable version (packaged)
+            local_appdata / 'Packages' / 'Microsoft.WindowsTerminal_8wekyb3d8bbwe' / 'LocalState' / 'settings.json',
+            # Preview version
+            local_appdata / 'Packages' / 'Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe' / 'LocalState' / 'settings.json',
+            # Unpackaged (development/portable)
+            local_appdata / 'Microsoft' / 'Windows Terminal' / 'settings.json',
+        ]
+        
+        for path in search_paths:
+            if path.exists():
+                return path
+        
+        return None
+    
+    def is_available(self):
+        """Check if Windows Terminal is available."""
+        return self.settings_path is not None
+    
+    def _backup_settings(self):
+        """Create backup of settings.json before modification."""
+        if not self.is_available():
+            return
+        
+        try:
+            backup_dir = Path.home() / 'AppData' / 'Local' / 'cmd-theme-pack' / 'wt-backups'
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            
+            backup_file = backup_dir / 'settings_backup.json'
+            
+            # Only create backup if it doesn't exist
+            if not backup_file.exists():
+                import shutil
+                shutil.copy2(self.settings_path, backup_file)
+        except:
+            pass  # Don't fail if backup fails
+    
+    def apply_theme(self, theme, opacity=None, use_acrylic=False):
+        """
+        Apply theme to Windows Terminal by adding it as a color scheme.
+        
+        Args:
+            theme: Theme object with colors
+            opacity: Optional opacity percentage (0-100)
+            use_acrylic: Whether to enable acrylic blur
+        """
+        if not self.is_available():
+            return False
+        
+        try:
+            # Backup before modification
+            self._backup_settings()
+            
+            with open(self.settings_path, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+            
+            # Ensure schemes array exists
+            if 'schemes' not in settings:
+                settings['schemes'] = []
+            
+            # Create color scheme from theme
+            scheme_name = f"CMDThemePack_{theme.name}"
+            color_scheme = {
+                "name": scheme_name,
+                "background": theme.colors['background'],
+                "foreground": theme.colors['foreground'],
+                "black": theme.colors['black'],
+                "red": theme.colors['red'],
+                "green": theme.colors['green'],
+                "yellow": theme.colors['yellow'],
+                "blue": theme.colors['blue'],
+                "purple": theme.colors['magenta'],
+                "cyan": theme.colors['cyan'],
+                "white": theme.colors['white'],
+                "brightBlack": theme.colors['bright_black'],
+                "brightRed": theme.colors['bright_red'],
+                "brightGreen": theme.colors['bright_green'],
+                "brightYellow": theme.colors['bright_yellow'],
+                "brightBlue": theme.colors['bright_blue'],
+                "brightPurple": theme.colors['bright_magenta'],
+                "brightCyan": theme.colors['bright_cyan'],
+                "brightWhite": theme.colors['bright_white'],
+            }
+            
+            # Remove existing scheme with same name if it exists
+            settings['schemes'] = [s for s in settings['schemes'] if s.get('name') != scheme_name]
+            
+            # Add new scheme
+            settings['schemes'].append(color_scheme)
+            
+            # Ensure profiles.defaults exists
+            if 'profiles' not in settings:
+                settings['profiles'] = {}
+            if 'defaults' not in settings['profiles']:
+                settings['profiles']['defaults'] = {}
+            
+            # Set the color scheme
+            settings['profiles']['defaults']['colorScheme'] = scheme_name
+            
+            # Apply opacity if specified
+            if opacity is not None:
+                settings['profiles']['defaults']['opacity'] = opacity
+            
+            # Apply blur/acrylic
+            if use_acrylic:
+                settings['profiles']['defaults']['useAcrylic'] = True
+            else:
+                # Remove useAcrylic if present
+                if 'useAcrylic' in settings['profiles']['defaults']:
+                    del settings['profiles']['defaults']['useAcrylic']
+            
+            # Write back
+            with open(self.settings_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=4)
+            
+            return True
+        except Exception as e:
+            raise Exception(f"Failed to apply theme to Windows Terminal: {e}")
+    
+    def restore_backup(self):
+        """Restore Windows Terminal settings from backup."""
+        backup_dir = Path.home() / 'AppData' / 'Local' / 'cmd-theme-pack' / 'wt-backups'
+        backup_file = backup_dir / 'settings_backup.json'
+        
+        if not backup_file.exists():
+            return False
+        
+        try:
+            import shutil
+            shutil.copy2(backup_file, self.settings_path)
+            return True
+        except:
+            return False
+    
+    def apply_opacity_blur(self, opacity=None, blur=False):
+        """Apply opacity and blur to Windows Terminal (legacy method)."""
+        if not self.is_available():
+            return False
+        
+        try:
+            # Backup before modification
+            self._backup_settings()
+            
+            with open(self.settings_path, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+            
+            # Ensure profiles.defaults exists
+            if 'profiles' not in settings:
+                settings['profiles'] = {}
+            if 'defaults' not in settings['profiles']:
+                settings['profiles']['defaults'] = {}
+            
+            # Apply opacity
+            if opacity is not None:
+                settings['profiles']['defaults']['opacity'] = opacity
+            
+            # Apply blur
+            if blur:
+                settings['profiles']['defaults']['useAcrylic'] = True
+            
+            # Write back
+            with open(self.settings_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=4)
+            
+            return True
+        except Exception as e:
+            raise Exception(f"Failed to modify Windows Terminal settings: {e}")
+    
+    def get_current_settings(self):
+        """Get current opacity and blur settings."""
+        if not self.is_available():
+            return None
+        
+        try:
+            with open(self.settings_path, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+            
+            defaults = settings.get('profiles', {}).get('defaults', {})
+            return {
+                'opacity': defaults.get('opacity'),
+                'useAcrylic': defaults.get('useAcrylic', False),
+                'colorScheme': defaults.get('colorScheme')
+            }
+        except:
+            return None
+
+
+class GitBashHandler:
+    """Handles Git Bash (mintty) .minttyrc configuration."""
+    
+    def __init__(self):
+        self.config_path = Path.home() / '.minttyrc'
+        self.backup_path = Path.home() / 'AppData' / 'Local' / 'cmd-theme-pack' / 'minttyrc_backup.txt'
+    
+    def is_available(self):
+        """Check if Git Bash is likely available (has git bash executable)."""
+        # Check common Git Bash installation paths
+        git_paths = [
+            Path('C:/Program Files/Git/usr/bin/mintty.exe'),
+            Path('C:/Program Files (x86)/Git/usr/bin/mintty.exe'),
+            Path.home() / 'AppData/Local/Programs/Git/usr/bin/mintty.exe',
+        ]
+        
+        for path in git_paths:
+            if path.exists():
+                return True
+        
+        return False
+    
+    def _backup_config(self):
+        """Create backup of .minttyrc before modification."""
+        if self.config_path.exists():
+            try:
+                self.backup_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Only create backup if it doesn't exist
+                if not self.backup_path.exists():
+                    import shutil
+                    shutil.copy2(self.config_path, self.backup_path)
+            except:
+                pass  # Don't fail if backup fails
+    
+    def apply_theme(self, theme):
+        """
+        Apply theme to Git Bash by writing color settings to ~/.minttyrc
+        
+        Args:
+            theme: Theme object with colors
+        """
+        try:
+            # Backup before modification
+            self._backup_config()
+            
+            # Read existing config if it exists
+            existing_config = []
+            color_keys = {
+                'ForegroundColour', 'BackgroundColour', 
+                'Black', 'Red', 'Green', 'Yellow', 'Blue', 'Magenta', 'Cyan', 'White',
+                'BoldBlack', 'BoldRed', 'BoldGreen', 'BoldYellow', 'BoldBlue', 'BoldMagenta', 'BoldCyan', 'BoldWhite'
+            }
+            
+            if self.config_path.exists():
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        # Keep non-color settings
+                        if not any(line.startswith(key + '=') for key in color_keys):
+                            existing_config.append(line.rstrip())
+            
+            # Convert hex to RGB tuples
+            def hex_to_rgb_str(hex_color):
+                hex_color = hex_color.lstrip('#')
+                r = int(hex_color[0:2], 16)
+                g = int(hex_color[2:4], 16)
+                b = int(hex_color[4:6], 16)
+                return f"{r},{g},{b}"
+            
+            # Build color configuration
+            color_config = [
+                f"ForegroundColour={hex_to_rgb_str(theme.colors['foreground'])}",
+                f"BackgroundColour={hex_to_rgb_str(theme.colors['background'])}",
+                f"Black={hex_to_rgb_str(theme.colors['black'])}",
+                f"Red={hex_to_rgb_str(theme.colors['red'])}",
+                f"Green={hex_to_rgb_str(theme.colors['green'])}",
+                f"Yellow={hex_to_rgb_str(theme.colors['yellow'])}",
+                f"Blue={hex_to_rgb_str(theme.colors['blue'])}",
+                f"Magenta={hex_to_rgb_str(theme.colors['magenta'])}",
+                f"Cyan={hex_to_rgb_str(theme.colors['cyan'])}",
+                f"White={hex_to_rgb_str(theme.colors['white'])}",
+                f"BoldBlack={hex_to_rgb_str(theme.colors['bright_black'])}",
+                f"BoldRed={hex_to_rgb_str(theme.colors['bright_red'])}",
+                f"BoldGreen={hex_to_rgb_str(theme.colors['bright_green'])}",
+                f"BoldYellow={hex_to_rgb_str(theme.colors['bright_yellow'])}",
+                f"BoldBlue={hex_to_rgb_str(theme.colors['bright_blue'])}",
+                f"BoldMagenta={hex_to_rgb_str(theme.colors['bright_magenta'])}",
+                f"BoldCyan={hex_to_rgb_str(theme.colors['bright_cyan'])}",
+                f"BoldWhite={hex_to_rgb_str(theme.colors['bright_white'])}",
+            ]
+            
+            # Write combined configuration
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                # Write non-color settings first
+                for line in existing_config:
+                    f.write(line + '\n')
+                # Write color settings
+                f.write('\n# CMD Theme Pack colors\n')
+                for line in color_config:
+                    f.write(line + '\n')
+            
+            return True
+        except Exception as e:
+            raise Exception(f"Failed to apply theme to Git Bash: {e}")
+    
+    def restore_backup(self):
+        """Restore Git Bash .minttyrc from backup."""
+        if not self.backup_path.exists():
+            return False
+        
+        try:
+            import shutil
+            shutil.copy2(self.backup_path, self.config_path)
+            return True
+        except:
+            return False
     """Handles Windows Terminal settings.json modifications."""
     
     def __init__(self):
@@ -2355,6 +2701,40 @@ def cmd_apply(args):
         
         return
     
+    # Check if Git Bash is explicitly requested
+    if shell_target == 'gitbash' or shell_target == 'git-bash' or shell_target == 'bash':
+        gitbash_handler = GitBashHandler()
+        if not gitbash_handler.is_available():
+            print("ERROR: Git Bash not found", file=sys.stderr)
+            print("Install Git for Windows or use --for cmd/powershell", file=sys.stderr)
+            sys.exit(1)
+        
+        # Create backup
+        if not backup_manager.backup_exists():
+            try:
+                backup_manager.create_backup()
+                print("✓ Backup created successfully")
+            except Exception as e:
+                print(f"ERROR: Failed to create backup: {e}", file=sys.stderr)
+                sys.exit(1)
+        
+        # Apply theme to Git Bash
+        try:
+            gitbash_handler.apply_theme(theme)
+            
+            print(f"✓ Theme '{theme.name}' applied to Git Bash!")
+            print()
+            print("Restart Git Bash to see the changes.")
+            print("Note: Opacity and blur effects are not supported in mintty.")
+            
+            # Save to history
+            backup_manager.save_state_before_apply(theme.name, None, False, None)
+        except Exception as e:
+            print(f"ERROR: Failed to apply theme to Git Bash: {e}", file=sys.stderr)
+            sys.exit(1)
+        
+        return
+    
     # Parse tint color if specified
     tint_color = None
     if args.tint:
@@ -2427,7 +2807,7 @@ def cmd_apply(args):
             shell_desc = "PowerShell only"
         else:
             print(f"ERROR: Invalid shell target '{shell_target}'", file=sys.stderr)
-            print("Valid options: cmd, powershell, both, wt (or windowsterminal)", file=sys.stderr)
+            print("Valid options: cmd, powershell, both, wt (windowsterminal), gitbash (bash)", file=sys.stderr)
             sys.exit(1)
         
         # Apply theme to each target shell
