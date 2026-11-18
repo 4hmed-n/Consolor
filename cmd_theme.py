@@ -57,8 +57,9 @@ class ThemeGUI:
         
         self.root = tk.Tk()
         self.root.title(f"CMD Theme Pack - v{__version__}")
-        self.root.geometry("600x700")
-        self.root.resizable(False, False)
+        self.root.geometry("700x850")
+        self.root.minsize(700, 850)
+        self.root.resizable(True, True)
         
         # Dark theme colors
         self.bg_color = "#1e1e1e"
@@ -79,8 +80,10 @@ class ThemeGUI:
         self.tint_strength_var = tk.IntVar(value=60)
         self.use_acrylic_var = tk.BooleanVar(value=False)
         self.window_alpha_var = tk.IntVar(value=100)
-        self.autoblur_var = tk.BooleanVar(value=False)
-        self.clip_edges_var = tk.BooleanVar(value=False)
+        self.shell_selector_var = tk.StringVar(value="Both")
+        self.autoblur_cmd_var = tk.BooleanVar(value=False)
+        self.autoblur_powershell_var = tk.BooleanVar(value=False)
+        self.live_preview_var = tk.BooleanVar(value=False)
         
         self.blur_handler = BlurHandler()
         
@@ -88,29 +91,53 @@ class ThemeGUI:
         self.create_widgets()
         
         # Apply initial preview
-        self.root.after(100, self.update_preview)
+        self.root.after(100, self.draw_color_swatch)
+        self.root.after(150, self.draw_preview_box)
     
     def create_widgets(self):
         """Create all GUI widgets."""
-        # Main container
-        main_frame = tk.Frame(self.root, bg=self.bg_color)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        # Main container with scrollbar
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
         # Theme selection
         theme_label = tk.Label(main_frame, text="Theme:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
         theme_label.pack(anchor="w", pady=(0, 5))
         
-        theme_frame = tk.Frame(main_frame, bg=self.bg_color)
+        theme_frame = ttk.Frame(main_frame)
         theme_frame.pack(fill=tk.X, pady=(0, 10))
         
         self.theme_combo = ttk.Combobox(theme_frame, textvariable=self.selected_theme, 
-                                        values=[t.name for t in self.themes], state="readonly", width=40)
-        self.theme_combo.pack(side=tk.LEFT)
+                                        values=[t.name for t in self.themes], state="readonly", width=50)
+        self.theme_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.theme_combo.bind("<<ComboboxSelected>>", lambda e: self.on_theme_changed())
         
-        # Color swatch
+        # Color swatch (traditional 16-color palette)
         self.swatch_canvas = tk.Canvas(main_frame, height=30, bg=self.widget_bg, highlightthickness=0)
-        self.swatch_canvas.pack(fill=tk.X, pady=(0, 15))
+        self.swatch_canvas.pack(fill=tk.X, pady=(0, 10))
+        
+        # Preview box (new in-window preview)
+        preview_label = tk.Label(main_frame, text="Preview:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
+        preview_label.pack(anchor="w", pady=(10, 5))
+        
+        self.preview_canvas = tk.Canvas(main_frame, height=120, bg=self.widget_bg, highlightthickness=1, highlightbackground=self.fg_color)
+        self.preview_canvas.pack(fill=tk.X, pady=(0, 5))
+        
+        # Live preview checkbox
+        tk.Checkbutton(main_frame, text="Live preview on this window (apply glass effect to GUI)", 
+                      variable=self.live_preview_var, command=self.on_live_preview_changed,
+                      bg=self.bg_color, fg=self.fg_color,
+                      selectcolor=self.widget_bg).pack(anchor="w", pady=(0, 15))
+        
+        # Apply to selector
+        apply_to_frame = ttk.Frame(main_frame)
+        apply_to_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(apply_to_frame, text="Apply to:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
+        
+        for shell_name in ["CMD", "PowerShell", "Both"]:
+            tk.Radiobutton(apply_to_frame, text=shell_name, variable=self.shell_selector_var, value=shell_name,
+                          bg=self.bg_color, fg=self.fg_color, selectcolor=self.widget_bg).pack(side=tk.LEFT, padx=(10, 5))
         
         # Opacity slider
         self.create_slider(main_frame, "Opacity:", self.opacity_var, 30, 100, self.on_setting_changed)
@@ -119,7 +146,7 @@ class ThemeGUI:
         tint_label = tk.Label(main_frame, text="Tint Color:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
         tint_label.pack(anchor="w", pady=(10, 5))
         
-        tint_buttons_frame = tk.Frame(main_frame, bg=self.bg_color)
+        tint_buttons_frame = ttk.Frame(main_frame)
         tint_buttons_frame.pack(fill=tk.X, pady=(0, 10))
         
         tk.Button(tint_buttons_frame, text="Pick Color", command=self.pick_tint_color, 
@@ -138,7 +165,7 @@ class ThemeGUI:
         self.create_slider(main_frame, "Tint Strength:", self.tint_strength_var, 0, 100, self.on_setting_changed)
         
         # Mode toggle
-        mode_frame = tk.Frame(main_frame, bg=self.bg_color)
+        mode_frame = ttk.Frame(main_frame)
         mode_frame.pack(fill=tk.X, pady=(10, 10))
         
         tk.Label(mode_frame, text="Mode:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
@@ -154,19 +181,23 @@ class ThemeGUI:
         # Window alpha slider
         self.create_slider(main_frame, "Window Alpha (CMD opacity):", self.window_alpha_var, 60, 100, self.on_setting_changed)
         
-        # Autoblur checkbox
-        tk.Checkbutton(main_frame, text="Apply to every new CMD window (autoblur)", 
-                      variable=self.autoblur_var, bg=self.bg_color, fg=self.fg_color,
-                      selectcolor=self.widget_bg).pack(anchor="w", pady=(10, 5))
+        # Autoblur checkboxes (per-shell)
+        autoblur_label = tk.Label(main_frame, text="Autoblur (apply to every new window):", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
+        autoblur_label.pack(anchor="w", pady=(10, 5))
         
-        # Clip edges checkbox
-        tk.Checkbutton(main_frame, text="Clip edges (prevent tint bleed)", 
-                      variable=self.clip_edges_var, command=self.on_clip_edges_changed,
-                      bg=self.bg_color, fg=self.fg_color,
-                      selectcolor=self.widget_bg).pack(anchor="w", pady=(0, 15))
+        autoblur_frame = ttk.Frame(main_frame)
+        autoblur_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        tk.Checkbutton(autoblur_frame, text="CMD", 
+                      variable=self.autoblur_cmd_var, bg=self.bg_color, fg=self.fg_color,
+                      selectcolor=self.widget_bg).pack(side=tk.LEFT, padx=(10, 15))
+        
+        tk.Checkbutton(autoblur_frame, text="PowerShell", 
+                      variable=self.autoblur_powershell_var, bg=self.bg_color, fg=self.fg_color,
+                      selectcolor=self.widget_bg).pack(side=tk.LEFT)
         
         # Action buttons
-        button_frame = tk.Frame(main_frame, bg=self.bg_color)
+        button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=(0, 10))
         
         tk.Button(button_frame, text="Apply", command=self.apply_theme, 
@@ -187,7 +218,7 @@ class ThemeGUI:
     
     def create_slider(self, parent, label_text, variable, from_, to, command):
         """Helper to create labeled slider."""
-        frame = tk.Frame(parent, bg=self.bg_color)
+        frame = ttk.Frame(parent)
         frame.pack(fill=tk.X, pady=(0, 10))
         
         label = tk.Label(frame, text=label_text, bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
@@ -204,19 +235,40 @@ class ThemeGUI:
     def on_theme_changed(self):
         """Handle theme selection change."""
         self.draw_color_swatch()
-        self.update_preview()
+        self.draw_preview_box()
+        if self.live_preview_var.get():
+            self.update_live_preview()
     
     def on_setting_changed(self):
         """Handle any setting change."""
-        self.update_preview()
+        self.draw_preview_box()
+        if self.live_preview_var.get():
+            self.update_live_preview()
     
-    def on_clip_edges_changed(self):
-        """Handle edge clipping toggle."""
-        hwnd = ctypes.windll.user32.GetForegroundWindow()
-        if self.clip_edges_var.get():
-            self.blur_handler.clip_window_edges(hwnd)
+    def on_live_preview_changed(self):
+        """Handle live preview toggle."""
+        if self.live_preview_var.get():
+            self.update_live_preview()
         else:
-            self.blur_handler.remove_window_clip(hwnd)
+            # Remove blur from GUI window
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            try:
+                # Reset to no blur
+                accent = self.blur_handler.ACCENT_POLICY()
+                accent.AccentState = 0  # ACCENT_DISABLED
+                accent.AccentFlags = 0
+                accent.GradientColor = 0
+                accent.AnimationId = 0
+                
+                data = self.blur_handler.WINDOWCOMPOSITIONATTRIBDATA()
+                data.Attribute = self.blur_handler.WCA_ACCENT_POLICY
+                data.Data = ctypes.pointer(accent)
+                data.SizeOfData = ctypes.sizeof(accent)
+                
+                if self.blur_handler.SetWindowCompositionAttribute:
+                    self.blur_handler.SetWindowCompositionAttribute(hwnd, ctypes.pointer(data))
+            except:
+                pass
     
     def draw_color_swatch(self):
         """Draw color swatch for selected theme."""
@@ -236,7 +288,7 @@ class ThemeGUI:
         
         canvas_width = self.swatch_canvas.winfo_width()
         if canvas_width <= 1:
-            canvas_width = 560  # Default width
+            canvas_width = 670  # Default width
         
         box_width = canvas_width / len(colors)
         
@@ -245,8 +297,69 @@ class ThemeGUI:
             x1 = (i + 1) * box_width
             self.swatch_canvas.create_rectangle(x0, 0, x1, 30, fill=color, outline="")
     
-    def update_preview(self):
-        """Update live glass preview on GUI window."""
+    def draw_preview_box(self):
+        """Draw preview box showing theme background, sample text, and tint overlay."""
+        theme = self.loader.get_theme(self.selected_theme.get())
+        if not theme:
+            return
+        
+        self.preview_canvas.delete("all")
+        
+        canvas_width = self.preview_canvas.winfo_width()
+        canvas_height = self.preview_canvas.winfo_height()
+        if canvas_width <= 1:
+            canvas_width = 670
+        if canvas_height <= 1:
+            canvas_height = 120
+        
+        # Draw theme background
+        bg_color = theme.colors['background']
+        self.preview_canvas.create_rectangle(0, 0, canvas_width, canvas_height, fill=bg_color, outline="")
+        
+        # Draw sample colored text
+        y_offset = 20
+        sample_texts = [
+            ("CMD Theme Pack", theme.colors['white'], 14, "bold"),
+            ("C:\\> dir", theme.colors['foreground'], 11, "normal"),
+            ("File not found", theme.colors['red'], 10, "normal"),
+            ("Operation successful", theme.colors['green'], 10, "normal"),
+        ]
+        
+        for text, color, size, weight in sample_texts:
+            self.preview_canvas.create_text(10, y_offset, text=text, fill=color, anchor="w", 
+                                           font=("Consolas", size, weight))
+            y_offset += 22
+        
+        # Apply tint overlay if tint is set
+        if self.tint_color:
+            tint_strength = self.tint_strength_var.get()
+            # Convert tint strength (0-100) to alpha (0-255)
+            alpha = int(tint_strength * 2.55)
+            
+            # Parse tint color
+            tint_hex = self.tint_color.lstrip('#')
+            r = int(tint_hex[0:2], 16)
+            g = int(tint_hex[2:4], 16)
+            b = int(tint_hex[4:6], 16)
+            
+            # Create a semi-transparent overlay using stipple pattern
+            # (Canvas doesn't support true alpha, so we simulate with a pattern)
+            overlay_color = self.tint_color
+            
+            # Draw overlay rectangles with stipple for transparency effect
+            if tint_strength > 0:
+                # Create multiple stippled layers for better visual effect
+                stipple_patterns = ['gray75', 'gray50', 'gray25']
+                pattern = stipple_patterns[min(int(tint_strength / 35), 2)]
+                self.preview_canvas.create_rectangle(0, 0, canvas_width, canvas_height, 
+                                                    fill=overlay_color, outline="", 
+                                                    stipple=pattern)
+    
+    def update_live_preview(self):
+        """Update live glass preview on GUI window (only if checkbox is enabled)."""
+        if not self.live_preview_var.get():
+            return
+        
         try:
             theme = self.loader.get_theme(self.selected_theme.get())
             if not theme:
@@ -279,7 +392,9 @@ class ThemeGUI:
     def set_tint_color(self, color_hex):
         """Set tint color."""
         self.tint_color = color_hex
-        self.update_preview()
+        self.draw_preview_box()
+        if self.live_preview_var.get():
+            self.update_live_preview()
     
     def apply_theme(self):
         """Apply the selected theme with current settings."""
@@ -292,7 +407,15 @@ class ThemeGUI:
             opacity = self.opacity_var.get()
             use_acrylic = self.use_acrylic_var.get()
             window_alpha_percent = self.window_alpha_var.get()
-            autoblur = self.autoblur_var.get()
+            
+            # Get shell selection
+            shell_selection = self.shell_selector_var.get()
+            shell_param = None
+            if shell_selection == "CMD":
+                shell_param = "cmd"
+            elif shell_selection == "PowerShell":
+                shell_param = "powershell"
+            # "Both" = None (applies to global)
             
             # Create backup
             backup_manager = BackupManager()
@@ -304,7 +427,7 @@ class ThemeGUI:
             
             # Convert window alpha percentage to registry value
             window_alpha_registry = max(60, opacity) if self.tint_color else window_alpha_percent
-            handler.apply_theme(theme, opacity=window_alpha_registry)
+            handler.apply_theme(theme, opacity=window_alpha_registry, shell=shell_param)
             
             # Apply blur if tint is set
             blur_applied = False
@@ -313,13 +436,24 @@ class ThemeGUI:
                     blur_tint = self.tint_color if self.tint_color else theme.colors['background']
                     blur_opacity = self.tint_strength_var.get()
                     
-                    # Save settings for autoblur
-                    backup_manager.save_blur_settings(
-                        tint=self.tint_color,
-                        opacity=blur_opacity,
-                        theme_background=theme.colors['background'],
-                        use_acrylic=use_acrylic
-                    )
+                    # Save settings for autoblur (per shell)
+                    if shell_param:
+                        backup_manager.save_blur_settings(
+                            tint=self.tint_color,
+                            opacity=blur_opacity,
+                            theme_background=theme.colors['background'],
+                            use_acrylic=use_acrylic,
+                            shell=shell_param
+                        )
+                    else:
+                        # Both shells
+                        backup_manager.save_blur_settings(
+                            tint=self.tint_color,
+                            opacity=blur_opacity,
+                            theme_background=theme.colors['background'],
+                            use_acrylic=use_acrylic,
+                            shell='both'
+                        )
                     
                     # Apply to current console window
                     kernel32 = ctypes.windll.kernel32
@@ -331,17 +465,22 @@ class ThemeGUI:
                 except Exception as e:
                     self.status_label.config(text=f"Blur failed: {e}", fg="#ffaa00")
             
-            # Handle autoblur
-            if autoblur and (self.tint_color or blur_applied):
+            # Handle autoblur per shell
+            if self.autoblur_cmd_var.get() or self.autoblur_powershell_var.get():
                 handler.enable_autoblur()
-            elif not autoblur:
+            else:
                 handler.disable_autoblur()
-                backup_manager.clear_blur_settings()
+                if shell_param:
+                    backup_manager.clear_blur_settings(shell=shell_param)
+                else:
+                    backup_manager.clear_blur_settings(shell='cmd')
+                    backup_manager.clear_blur_settings(shell='powershell')
             
             # Save to history
             backup_manager.save_state_before_apply(theme.name, opacity, blur_applied, self.tint_color)
             
-            self.status_label.config(text=f"✓ Applied: {theme.name}", fg="#00ff00")
+            shell_desc = {"CMD": "CMD", "PowerShell": "PowerShell", "Both": "both shells"}[shell_selection]
+            self.status_label.config(text=f"✓ Applied: {theme.name} to {shell_desc}", fg="#00ff00")
             
         except Exception as e:
             self.status_label.config(text=f"ERROR: {e}", fg="#ff0000")
@@ -354,13 +493,28 @@ class ThemeGUI:
                 self.status_label.config(text="No backup found", fg="#ffaa00")
                 return
             
-            backup_manager.restore_backup()
-            backup_manager.clear_blur_settings()
+            # Get shell selection
+            shell_selection = self.shell_selector_var.get()
+            shell_param = None
+            if shell_selection == "CMD":
+                shell_param = "cmd"
+            elif shell_selection == "PowerShell":
+                shell_param = "powershell"
+            
+            backup_manager.restore_backup(shell=shell_param)
+            
+            if shell_param:
+                backup_manager.clear_blur_settings(shell=shell_param)
+            else:
+                backup_manager.clear_blur_settings(shell='cmd')
+                backup_manager.clear_blur_settings(shell='powershell')
             
             handler = RegistryHandler()
-            handler.disable_autoblur()
+            if not shell_param:
+                handler.disable_autoblur()
             
-            self.status_label.config(text="✓ Restored from backup", fg="#00ff00")
+            shell_desc = {"CMD": "CMD", "PowerShell": "PowerShell", "Both": "all shells"}[shell_selection]
+            self.status_label.config(text=f"✓ Restored {shell_desc} from backup", fg="#00ff00")
         except Exception as e:
             self.status_label.config(text=f"ERROR: {e}", fg="#ff0000")
     
@@ -1324,6 +1478,9 @@ class BlurHandler:
         Convert theme hex color and opacity to GradientColor DWORD.
         Format: 0xAABBGGRR where AA=tint opacity, BBGGRR=BGR color
         
+        NOTE: GradientColor uses BGR format (Windows convention), not RGB.
+        The hex input is #RRGGBB, but we store it as 0xAABBGGRR (reversed color order).
+        
         Args:
             hex_color: #RRGGBB format
             opacity_percent: 30-100 (tint opacity, lower = more see-through)
@@ -1342,7 +1499,7 @@ class BlurHandler:
         opacity_percent = max(30, min(100, opacity_percent))
         alpha = round(opacity_percent * 255 / 100)
         
-        # Format: 0xAABBGGRR (alpha, blue, green, red)
+        # Format: 0xAABBGGRR (alpha, blue, green, red) - BGR order for Windows
         gradient_color = (alpha << 24) | (b << 16) | (g << 8) | r
         
         return gradient_color
