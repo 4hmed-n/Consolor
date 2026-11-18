@@ -5,6 +5,8 @@ A command-line utility for managing and applying color schemes to Windows Comman
 Uses only Python standard library (winreg, json, argparse, ctypes).
 """
 
+__version__ = "0.2.0"
+
 import winreg
 import json
 import argparse
@@ -13,8 +15,381 @@ import sys
 import ctypes
 import random
 import time
+import colorsys
 from pathlib import Path
 from ctypes import wintypes
+
+# Check if GUI modules are available
+try:
+    import tkinter as tk
+    from tkinter import ttk, colorchooser
+    GUI_AVAILABLE = True
+except ImportError:
+    GUI_AVAILABLE = False
+
+# Check if msvcrt is available (Windows only)
+try:
+    import msvcrt
+    MSVCRT_AVAILABLE = True
+except ImportError:
+    MSVCRT_AVAILABLE = False
+
+
+def hide_console_window():
+    """Hide the console window (for GUI mode)."""
+    try:
+        kernel32 = ctypes.windll.kernel32
+        user32 = ctypes.windll.user32
+        hwnd = kernel32.GetConsoleWindow()
+        if hwnd:
+            user32.ShowWindow(hwnd, 0)  # SW_HIDE
+    except:
+        pass
+
+
+class ThemeGUI:
+    """GUI for theme management."""
+    
+    def __init__(self):
+        if not GUI_AVAILABLE:
+            print("ERROR: GUI not available (tkinter not found)", file=sys.stderr)
+            sys.exit(1)
+        
+        self.root = tk.Tk()
+        self.root.title(f"CMD Theme Pack - v{__version__}")
+        self.root.geometry("600x700")
+        self.root.resizable(False, False)
+        
+        # Dark theme colors
+        self.bg_color = "#1e1e1e"
+        self.fg_color = "#d4d4d4"
+        self.widget_bg = "#2d2d2d"
+        self.button_bg = "#3e3e3e"
+        
+        self.root.configure(bg=self.bg_color)
+        
+        # Load theme data
+        self.loader = ThemeLoader()
+        self.themes = sorted(self.loader.list_themes(), key=lambda t: t.name)
+        
+        # State variables
+        self.selected_theme = tk.StringVar(value=self.themes[0].name if self.themes else "")
+        self.opacity_var = tk.IntVar(value=70)
+        self.tint_color = None  # None = no tint
+        self.tint_strength_var = tk.IntVar(value=60)
+        self.use_acrylic_var = tk.BooleanVar(value=False)
+        self.window_alpha_var = tk.IntVar(value=100)
+        self.autoblur_var = tk.BooleanVar(value=False)
+        
+        self.blur_handler = BlurHandler()
+        
+        # Create UI
+        self.create_widgets()
+        
+        # Apply initial preview
+        self.root.after(100, self.update_preview)
+    
+    def create_widgets(self):
+        """Create all GUI widgets."""
+        # Main container
+        main_frame = tk.Frame(self.root, bg=self.bg_color)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # Theme selection
+        theme_label = tk.Label(main_frame, text="Theme:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
+        theme_label.pack(anchor="w", pady=(0, 5))
+        
+        theme_frame = tk.Frame(main_frame, bg=self.bg_color)
+        theme_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.theme_combo = ttk.Combobox(theme_frame, textvariable=self.selected_theme, 
+                                        values=[t.name for t in self.themes], state="readonly", width=40)
+        self.theme_combo.pack(side=tk.LEFT)
+        self.theme_combo.bind("<<ComboboxSelected>>", lambda e: self.on_theme_changed())
+        
+        # Color swatch
+        self.swatch_canvas = tk.Canvas(main_frame, height=30, bg=self.widget_bg, highlightthickness=0)
+        self.swatch_canvas.pack(fill=tk.X, pady=(0, 15))
+        
+        # Opacity slider
+        self.create_slider(main_frame, "Opacity:", self.opacity_var, 30, 100, self.on_setting_changed)
+        
+        # Tint section
+        tint_label = tk.Label(main_frame, text="Tint Color:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
+        tint_label.pack(anchor="w", pady=(10, 5))
+        
+        tint_buttons_frame = tk.Frame(main_frame, bg=self.bg_color)
+        tint_buttons_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Button(tint_buttons_frame, text="Pick Color", command=self.pick_tint_color, 
+                 bg=self.button_bg, fg=self.fg_color, relief=tk.FLAT, padx=10, pady=5).pack(side=tk.LEFT, padx=(0, 5))
+        
+        for color_name, color_hex in [("Red", "#FF0000"), ("Blue", "#0000FF"), ("Green", "#00FF00"), 
+                                       ("Purple", "#800080"), ("Pink", "#FFC0CB"), ("None", None)]:
+            btn = tk.Button(tint_buttons_frame, text=color_name, 
+                           command=lambda c=color_hex: self.set_tint_color(c),
+                           bg=color_hex if color_hex else self.button_bg, 
+                           fg="white" if color_hex else self.fg_color,
+                           relief=tk.FLAT, padx=10, pady=5)
+            btn.pack(side=tk.LEFT, padx=2)
+        
+        # Tint strength slider
+        self.create_slider(main_frame, "Tint Strength:", self.tint_strength_var, 0, 100, self.on_setting_changed)
+        
+        # Mode toggle
+        mode_frame = tk.Frame(main_frame, bg=self.bg_color)
+        mode_frame.pack(fill=tk.X, pady=(10, 10))
+        
+        tk.Label(mode_frame, text="Mode:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
+        
+        tk.Radiobutton(mode_frame, text="Blur (no drag lag)", variable=self.use_acrylic_var, value=False,
+                      command=self.on_setting_changed, bg=self.bg_color, fg=self.fg_color, 
+                      selectcolor=self.widget_bg).pack(side=tk.LEFT, padx=(10, 5))
+        
+        tk.Radiobutton(mode_frame, text="Acrylic (lags on drag)", variable=self.use_acrylic_var, value=True,
+                      command=self.on_setting_changed, bg=self.bg_color, fg=self.fg_color,
+                      selectcolor=self.widget_bg).pack(side=tk.LEFT)
+        
+        # Window alpha slider
+        self.create_slider(main_frame, "Window Alpha (CMD opacity):", self.window_alpha_var, 60, 100, self.on_setting_changed)
+        
+        # Autoblur checkbox
+        tk.Checkbutton(main_frame, text="Apply to every new CMD window (autoblur)", 
+                      variable=self.autoblur_var, bg=self.bg_color, fg=self.fg_color,
+                      selectcolor=self.widget_bg).pack(anchor="w", pady=(10, 15))
+        
+        # Action buttons
+        button_frame = tk.Frame(main_frame, bg=self.bg_color)
+        button_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Button(button_frame, text="Apply", command=self.apply_theme, 
+                 bg="#007acc", fg="white", relief=tk.FLAT, padx=20, pady=8, font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=(0, 10))
+        
+        tk.Button(button_frame, text="Restore", command=self.restore_backup,
+                 bg=self.button_bg, fg=self.fg_color, relief=tk.FLAT, padx=15, pady=8).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(button_frame, text="Undo", command=self.undo_theme,
+                 bg=self.button_bg, fg=self.fg_color, relief=tk.FLAT, padx=15, pady=8).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(button_frame, text="Random", command=self.random_theme,
+                 bg=self.button_bg, fg=self.fg_color, relief=tk.FLAT, padx=15, pady=8).pack(side=tk.LEFT, padx=5)
+        
+        # Status label
+        self.status_label = tk.Label(main_frame, text="Ready", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 9))
+        self.status_label.pack(anchor="w", pady=(10, 0))
+    
+    def create_slider(self, parent, label_text, variable, from_, to, command):
+        """Helper to create labeled slider."""
+        frame = tk.Frame(parent, bg=self.bg_color)
+        frame.pack(fill=tk.X, pady=(0, 10))
+        
+        label = tk.Label(frame, text=label_text, bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
+        label.pack(side=tk.LEFT)
+        
+        value_label = tk.Label(frame, textvariable=variable, bg=self.bg_color, fg=self.fg_color, width=4)
+        value_label.pack(side=tk.RIGHT)
+        
+        slider = tk.Scale(frame, from_=from_, to=to, orient=tk.HORIZONTAL, variable=variable,
+                         command=lambda v: command(), bg=self.widget_bg, fg=self.fg_color,
+                         highlightthickness=0, troughcolor=self.button_bg, showvalue=False)
+        slider.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 10))
+    
+    def on_theme_changed(self):
+        """Handle theme selection change."""
+        self.draw_color_swatch()
+        self.update_preview()
+    
+    def on_setting_changed(self):
+        """Handle any setting change."""
+        self.update_preview()
+    
+    def draw_color_swatch(self):
+        """Draw color swatch for selected theme."""
+        theme = self.loader.get_theme(self.selected_theme.get())
+        if not theme:
+            return
+        
+        self.swatch_canvas.delete("all")
+        
+        colors = [
+            theme.colors['background'], theme.colors['foreground'],
+            theme.colors['black'], theme.colors['red'], theme.colors['green'], theme.colors['yellow'],
+            theme.colors['blue'], theme.colors['magenta'], theme.colors['cyan'], theme.colors['white'],
+            theme.colors['bright_black'], theme.colors['bright_red'], theme.colors['bright_green'], theme.colors['bright_yellow'],
+            theme.colors['bright_blue'], theme.colors['bright_magenta'], theme.colors['bright_cyan'], theme.colors['bright_white']
+        ]
+        
+        canvas_width = self.swatch_canvas.winfo_width()
+        if canvas_width <= 1:
+            canvas_width = 560  # Default width
+        
+        box_width = canvas_width / len(colors)
+        
+        for i, color in enumerate(colors):
+            x0 = i * box_width
+            x1 = (i + 1) * box_width
+            self.swatch_canvas.create_rectangle(x0, 0, x1, 30, fill=color, outline="")
+    
+    def update_preview(self):
+        """Update live glass preview on GUI window."""
+        try:
+            theme = self.loader.get_theme(self.selected_theme.get())
+            if not theme:
+                return
+            
+            # Determine tint color
+            if self.tint_color:
+                tint = self.tint_color
+            else:
+                tint = theme.colors['background']
+            
+            opacity = self.tint_strength_var.get()
+            use_acrylic = self.use_acrylic_var.get()
+            
+            # Get GUI window handle
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            
+            # Apply blur to GUI window
+            self.blur_handler.apply_blur_to_window(hwnd, tint, opacity, use_acrylic)
+            
+        except Exception as e:
+            pass  # Silently fail preview
+    
+    def pick_tint_color(self):
+        """Open color picker for tint."""
+        color = colorchooser.askcolor(title="Pick Tint Color")
+        if color and color[1]:
+            self.set_tint_color(color[1])
+    
+    def set_tint_color(self, color_hex):
+        """Set tint color."""
+        self.tint_color = color_hex
+        self.update_preview()
+    
+    def apply_theme(self):
+        """Apply the selected theme with current settings."""
+        try:
+            theme = self.loader.get_theme(self.selected_theme.get())
+            if not theme:
+                self.status_label.config(text="ERROR: Theme not found", fg="#ff0000")
+                return
+            
+            opacity = self.opacity_var.get()
+            use_acrylic = self.use_acrylic_var.get()
+            window_alpha_percent = self.window_alpha_var.get()
+            autoblur = self.autoblur_var.get()
+            
+            # Create backup
+            backup_manager = BackupManager()
+            if not backup_manager.backup_exists():
+                backup_manager.create_backup()
+            
+            # Apply theme to registry
+            handler = RegistryHandler()
+            
+            # Convert window alpha percentage to registry value
+            window_alpha_registry = max(60, opacity) if self.tint_color else window_alpha_percent
+            handler.apply_theme(theme, opacity=window_alpha_registry)
+            
+            # Apply blur if tint is set
+            blur_applied = False
+            if self.tint_color or opacity < 100:
+                try:
+                    blur_tint = self.tint_color if self.tint_color else theme.colors['background']
+                    blur_opacity = self.tint_strength_var.get()
+                    
+                    # Save settings for autoblur
+                    backup_manager.save_blur_settings(
+                        tint=self.tint_color,
+                        opacity=blur_opacity,
+                        theme_background=theme.colors['background'],
+                        use_acrylic=use_acrylic
+                    )
+                    
+                    # Apply to current console window
+                    kernel32 = ctypes.windll.kernel32
+                    console_hwnd = kernel32.GetConsoleWindow()
+                    if console_hwnd:
+                        self.blur_handler.apply_blur_to_window(console_hwnd, blur_tint, blur_opacity, use_acrylic)
+                    
+                    blur_applied = True
+                except Exception as e:
+                    self.status_label.config(text=f"Blur failed: {e}", fg="#ffaa00")
+            
+            # Handle autoblur
+            if autoblur and (self.tint_color or blur_applied):
+                handler.enable_autoblur()
+            elif not autoblur:
+                handler.disable_autoblur()
+                backup_manager.clear_blur_settings()
+            
+            # Save to history
+            backup_manager.save_state_before_apply(theme.name, opacity, blur_applied, self.tint_color)
+            
+            self.status_label.config(text=f"✓ Applied: {theme.name}", fg="#00ff00")
+            
+        except Exception as e:
+            self.status_label.config(text=f"ERROR: {e}", fg="#ff0000")
+    
+    def restore_backup(self):
+        """Restore from backup."""
+        try:
+            backup_manager = BackupManager()
+            if not backup_manager.backup_exists():
+                self.status_label.config(text="No backup found", fg="#ffaa00")
+                return
+            
+            backup_manager.restore_backup()
+            backup_manager.clear_blur_settings()
+            
+            handler = RegistryHandler()
+            handler.disable_autoblur()
+            
+            self.status_label.config(text="✓ Restored from backup", fg="#00ff00")
+        except Exception as e:
+            self.status_label.config(text=f"ERROR: {e}", fg="#ff0000")
+    
+    def undo_theme(self):
+        """Undo to previous theme."""
+        try:
+            backup_manager = BackupManager()
+            state = backup_manager.get_state_to_restore()
+            
+            if not state:
+                self.status_label.config(text="Nothing to undo", fg="#ffaa00")
+                return
+            
+            theme_name = state.get('theme')
+            if theme_name:
+                # Update GUI to show the theme
+                self.selected_theme.set(theme_name)
+                self.on_theme_changed()
+                
+                # Apply it
+                self.apply_theme()
+                
+                self.status_label.config(text=f"✓ Undone to: {theme_name}", fg="#00ff00")
+            
+        except Exception as e:
+            self.status_label.config(text=f"ERROR: {e}", fg="#ff0000")
+    
+    def random_theme(self):
+        """Select a random theme."""
+        if self.themes:
+            theme = random.choice(self.themes)
+            self.selected_theme.set(theme.name)
+            self.on_theme_changed()
+    
+    def run(self):
+        """Run the GUI main loop."""
+        self.root.mainloop()
+
+
+def cmd_gui(args):
+    """Handle gui command."""
+    hide_console_window()
+    gui = ThemeGUI()
+    gui.run()
 
 
 def resource_path(relative_path):
@@ -548,6 +923,24 @@ class BlurHandler:
         hwnd = self.kernel32.GetConsoleWindow()
         if not hwnd:
             raise Exception("Could not get console window handle")
+        
+        return self.apply_blur_to_window(hwnd, tint_color_hex, tint_opacity_percent, use_acrylic)
+    
+    def apply_blur_to_window(self, hwnd, tint_color_hex, tint_opacity_percent, use_acrylic=False):
+        """
+        Apply blur to a specific window.
+        
+        Args:
+            hwnd: Window handle
+            tint_color_hex: Theme background color in #RRGGBB format
+            tint_opacity_percent: Tint opacity 30-100% (lower = more transparent/blurry)
+            use_acrylic: If True, use state 4 (acrylic, laggy on drag). If False, use state 3 (regular blur)
+        """
+        if not self.SetWindowCompositionAttribute:
+            raise Exception("SetWindowCompositionAttribute not available on this system")
+        
+        if not hwnd:
+            raise Exception("Invalid window handle")
         
         # Convert hex color to BGR format and add tint opacity
         # Format: 0xAABBGGRR (A=alpha/tint opacity, BGR=color)
@@ -1454,12 +1847,31 @@ def cmd_undo(args):
 
 def main():
     """Main CLI entry point."""
+    # If no arguments provided, launch GUI
+    if len(sys.argv) == 1:
+        if GUI_AVAILABLE:
+            hide_console_window()
+            gui = ThemeGUI()
+            gui.run()
+            return
+        else:
+            print("ERROR: GUI not available (tkinter not found)", file=sys.stderr)
+            print("Use command-line arguments instead.", file=sys.stderr)
+            sys.exit(1)
+    
     parser = argparse.ArgumentParser(
         prog='cmd_theme.py',
         description='CMD Theme Pack - Manage and apply CMD color themes'
     )
     
+    # Add version flag
+    parser.add_argument('--version', action='version', version=f'CMD Theme Pack v{__version__}')
+    
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    
+    # GUI command
+    parser_gui = subparsers.add_parser('gui', help='Open graphical user interface')
+    parser_gui.set_defaults(func=cmd_gui)
     
     # List command
     parser_list = subparsers.add_parser('list', help='List all available themes')
