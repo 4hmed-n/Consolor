@@ -58,8 +58,7 @@ class ThemeGUI:
         self.root = tk.Tk()
         self.root.title(f"CMD Theme Pack - v{__version__}")
         self.root.geometry("700x850")
-        self.root.minsize(700, 850)
-        self.root.resizable(True, True)
+        self.root.resizable(False, False)  # Disable resizing to prevent layout issues
         
         # Dark theme colors
         self.bg_color = "#1e1e1e"
@@ -112,22 +111,22 @@ class ThemeGUI:
         self.theme_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.theme_combo.bind("<<ComboboxSelected>>", lambda e: self.on_theme_changed())
         
-        # Color palette display (informational only)
-        palette_label = tk.Label(main_frame, text="Theme Color Palette (Preview Only):", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 9, "italic"))
-        palette_label.pack(anchor="w", pady=(10, 3))
+        # Color swatch (traditional 16-color palette) - READ ONLY DISPLAY
+        swatch_label = tk.Label(main_frame, text="Theme Color Palette (all 18 colors in this theme):", 
+                               bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 9, "italic"))
+        swatch_label.pack(anchor="w", pady=(10, 3))
         
-        # Color swatch (traditional 16-color palette)
-        self.swatch_canvas = tk.Canvas(main_frame, height=30, bg=self.widget_bg, highlightthickness=1, highlightbackground="#555555", relief=tk.SUNKEN)
+        self.swatch_canvas = tk.Canvas(main_frame, height=30, bg=self.widget_bg, highlightthickness=2, 
+                                      highlightbackground="#555555", relief=tk.SUNKEN)
         self.swatch_canvas.pack(fill=tk.X, pady=(0, 10))
-        self.swatch_canvas.bind('<Configure>', lambda e: self.draw_color_swatch())
         
         # Preview box (new in-window preview)
-        preview_label = tk.Label(main_frame, text="Preview:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
+        preview_label = tk.Label(main_frame, text="Preview (sample CMD output with theme colors):", 
+                                bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
         preview_label.pack(anchor="w", pady=(10, 5))
         
         self.preview_canvas = tk.Canvas(main_frame, height=120, bg=self.widget_bg, highlightthickness=1, highlightbackground=self.fg_color)
         self.preview_canvas.pack(fill=tk.X, pady=(0, 5))
-        self.preview_canvas.bind('<Configure>', lambda e: self.draw_preview_box())
         
         # Live preview checkbox
         tk.Checkbutton(main_frame, text="Live preview on this window (apply glass effect to GUI)", 
@@ -162,7 +161,8 @@ class ThemeGUI:
         self.create_slider(main_frame, "Opacity:", self.opacity_var, 30, 100, self.on_setting_changed)
         
         # Tint section
-        tint_label = tk.Label(main_frame, text="Tint Color:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
+        tint_label = tk.Label(main_frame, text="Tint Color (optional - click to add color overlay to blur effect):", 
+                             bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
         tint_label.pack(anchor="w", pady=(10, 5))
         
         tint_buttons_frame = tk.Frame(main_frame, bg=self.bg_color)
