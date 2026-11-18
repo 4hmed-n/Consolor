@@ -2204,10 +2204,38 @@ class BackupManager:
             try:
                 colors = handler.read_current_colors(shell=None)
                 snapshot['global_colors'] = colors
+                
+                # Also save PopupColors and WindowAlpha directly from registry
+                try:
+                    key = winreg.OpenKey(
+                        winreg.HKEY_CURRENT_USER,
+                        handler.CONSOLE_KEY_PATH,
+                        0,
+                        winreg.KEY_READ
+                    )
+                    try:
+                        # Read PopupColors
+                        try:
+                            popup_colors, _ = winreg.QueryValueEx(key, "PopupColors")
+                            snapshot['global_colors']['popup_colors'] = popup_colors
+                        except FileNotFoundError:
+                            snapshot['global_colors']['popup_colors'] = None
+                        
+                        # Read WindowAlpha
+                        try:
+                            window_alpha, _ = winreg.QueryValueEx(key, "WindowAlpha")
+                            snapshot['global_colors']['window_alpha'] = window_alpha
+                        except FileNotFoundError:
+                            snapshot['global_colors']['window_alpha'] = None
+                    finally:
+                        winreg.CloseKey(key)
+                except:
+                    snapshot['global_colors']['popup_colors'] = None
+                    snapshot['global_colors']['window_alpha'] = None
             except:
                 snapshot['global_colors'] = None
             
-            # Save global opacity
+            # Save global opacity (legacy)
             try:
                 opacity = handler.get_opacity(shell=None)
                 snapshot['global_opacity'] = opacity
@@ -2235,6 +2263,64 @@ class BackupManager:
         except Exception as e:
             # Don't fail - just log
             pass
+    
+    def restore_defaults(self):
+        """Restore Windows built-in defaults by deleting color values from global console key."""
+        handler = RegistryHandler()
+        
+        try:
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                handler.CONSOLE_KEY_PATH,
+                0,
+                winreg.KEY_WRITE
+            )
+            
+            try:
+                # Delete ColorTable00-15
+                for i in range(16):
+                    key_name = f"ColorTable{i:02d}"
+                    try:
+                        winreg.DeleteValue(key, key_name)
+                    except FileNotFoundError:
+                        pass  # Already doesn't exist
+                
+                # Delete ScreenColors
+                try:
+                    winreg.DeleteValue(key, "ScreenColors")
+                except FileNotFoundError:
+                    pass
+                
+                # Delete PopupColors if exists
+                try:
+                    winreg.DeleteValue(key, "PopupColors")
+                except FileNotFoundError:
+                    pass
+                
+                # Delete WindowAlpha
+                try:
+                    winreg.DeleteValue(key, "WindowAlpha")
+                except FileNotFoundError:
+                    pass
+            finally:
+                winreg.CloseKey(key)
+            
+            # Delete CMD per-exe key if it exists
+            try:
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, handler.CMD_CONSOLE_KEY)
+            except FileNotFoundError:
+                pass  # Already doesn't exist
+            except Exception as e:
+                pass  # Ignore other errors
+            
+            print("✓ Windows default console settings restored")
+            print("  All custom color values deleted from global registry key")
+            print("  Windows will use built-in defaults")
+            print()
+            print("Close and reopen CMD to see the default colors.")
+            
+        except Exception as e:
+            print(f"⚠ Failed to restore defaults: {e}")
     
     def save_blur_settings(self, tint=None, opacity=None, theme_background=None, use_acrylic=False, shell='cmd'):
         """Save blur settings for autoblur to use.
@@ -2564,8 +2650,20 @@ class BackupManager:
                                 
                                 winreg.SetValueEx(key, "ScreenColors", 0, winreg.REG_DWORD, colors['screen_colors'])
                                 
-                                # Restore opacity if it was set
-                                if snapshot['global_opacity'] is not None:
+                                # Restore PopupColors if it was set
+                                if 'popup_colors' in colors and colors['popup_colors'] is not None:
+                                    winreg.SetValueEx(key, "PopupColors", 0, winreg.REG_DWORD, colors['popup_colors'])
+                                else:
+                                    try:
+                                        winreg.DeleteValue(key, "PopupColors")
+                                    except FileNotFoundError:
+                                        pass
+                                
+                                # Restore WindowAlpha if it was set
+                                if 'window_alpha' in colors and colors['window_alpha'] is not None:
+                                    winreg.SetValueEx(key, "WindowAlpha", 0, winreg.REG_DWORD, colors['window_alpha'])
+                                elif snapshot.get('global_opacity') is not None:
+                                    # Fallback to legacy opacity conversion
                                     window_alpha = handler._opacity_to_window_alpha(snapshot['global_opacity'])
                                     winreg.SetValueEx(key, "WindowAlpha", 0, winreg.REG_DWORD, window_alpha)
                                 else:
@@ -2619,26 +2717,33 @@ class BackupManager:
                         current_colors = handler.read_current_colors(shell=None)
                         original_colors = snapshot['global_colors']
                         
-                        # Compare ColorTable00
-                        if current_colors['color_table'][0] == original_colors['color_table'][0]:
-                            print("✓ CMD settings restored successfully!")
+                        # Compare all ColorTable values
+                        mismatches = []
+                        for i in range(16):
+                            if current_colors['color_table'][i] != original_colors['color_table'][i]:
+                                mismatches.append(f"ColorTable{i:02d}: expected {hex(original_colors['color_table'][i])}, got {hex(current_colors['color_table'][i])}")
+                        
+                        # Compare ScreenColors
+                        if current_colors['screen_colors'] != original_colors['screen_colors']:
+                            mismatches.append(f"ScreenColors: expected {hex(original_colors['screen_colors'])}, got {hex(current_colors['screen_colors'])}")
+                        
+                        if len(mismatches) == 0:
+                            print("restored")
                             if blur_removed:
                                 print("✓ Blur removed from current window")
                             print()
-                            print(f"Note: ColorTable00 = {hex(current_colors['color_table'][0])}")
+                            print(f"ColorTable00 (before apply): {hex(original_colors['color_table'][0])}")
+                            print(f"ColorTable00 (after restore): {hex(current_colors['color_table'][0])}")
+                            print()
                             print("Close and reopen CMD to see the original colors.")
                         else:
-                            print("⚠ CMD restore completed but verification failed")
-                            print(f"Expected ColorTable00: {hex(original_colors['color_table'][0])}")
-                            print(f"Current ColorTable00:  {hex(current_colors['color_table'][0])}")
-                    except:
-                        print("✓ CMD settings restored")
+                            print("⚠ Verification failed - mismatching values:")
+                            for mismatch in mismatches:
+                                print(f"  {mismatch}")
+                    except Exception as e:
+                        print(f"✓ CMD settings restored (verification skipped: {e})")
                         if blur_removed:
                             print("✓ Blur removed from current window")
-                    
-                    return
-                    except:
-                        pass
                     
                     return
                 
@@ -3182,6 +3287,16 @@ def cmd_restore(args):
     """Handle restore command."""
     backup_manager = BackupManager()
     
+    # Handle --defaults flag (only for CMD)
+    if hasattr(args, 'defaults') and args.defaults:
+        shell_target = getattr(args, 'for_shell', None)
+        if shell_target and shell_target != 'cmd':
+            print("ERROR: --defaults can only be used with CMD (--for cmd or no --for)", file=sys.stderr)
+            sys.exit(1)
+        
+        backup_manager.restore_defaults()
+        return
+    
     if not backup_manager.backup_exists():
         print("ERROR: No backup found", file=sys.stderr)
         print(file=sys.stderr)
@@ -3646,6 +3761,7 @@ def main():
     # Restore command
     parser_restore = subparsers.add_parser('restore', help='Restore console settings from backup')
     parser_restore.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell'], help='Restore only CMD or PowerShell settings (default: restore all)')
+    parser_restore.add_argument('--defaults', action='store_true', help='Restore Windows built-in defaults by deleting global color values (CMD only)')
     parser_restore.set_defaults(func=cmd_restore)
     
     # Reset command (alias for restore)
