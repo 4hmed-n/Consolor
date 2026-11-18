@@ -96,15 +96,15 @@ class ThemeGUI:
     
     def create_widgets(self):
         """Create all GUI widgets."""
-        # Main container with scrollbar
-        main_frame = ttk.Frame(self.root)
+        # Main container
+        main_frame = tk.Frame(self.root, bg=self.bg_color)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
         # Theme selection
         theme_label = tk.Label(main_frame, text="Theme:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
         theme_label.pack(anchor="w", pady=(0, 5))
         
-        theme_frame = ttk.Frame(main_frame)
+        theme_frame = tk.Frame(main_frame, bg=self.bg_color)
         theme_frame.pack(fill=tk.X, pady=(0, 10))
         
         self.theme_combo = ttk.Combobox(theme_frame, textvariable=self.selected_theme, 
@@ -127,10 +127,10 @@ class ThemeGUI:
         tk.Checkbutton(main_frame, text="Live preview on this window (apply glass effect to GUI)", 
                       variable=self.live_preview_var, command=self.on_live_preview_changed,
                       bg=self.bg_color, fg=self.fg_color,
-                      selectcolor=self.widget_bg).pack(anchor="w", pady=(0, 15))
+                      selectcolor=self.widget_bg, activebackground=self.bg_color, activeforeground=self.fg_color).pack(anchor="w", pady=(0, 15))
         
         # Apply to selector
-        apply_to_frame = ttk.Frame(main_frame)
+        apply_to_frame = tk.Frame(main_frame, bg=self.bg_color)
         apply_to_frame.pack(fill=tk.X, pady=(0, 10))
         
         tk.Label(apply_to_frame, text="Apply to:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
@@ -149,7 +149,8 @@ class ThemeGUI:
         
         for shell_name in shell_options:
             tk.Radiobutton(apply_to_frame, text=shell_name, variable=self.shell_selector_var, value=shell_name,
-                          bg=self.bg_color, fg=self.fg_color, selectcolor=self.widget_bg).pack(side=tk.LEFT, padx=(10, 5))
+                          bg=self.bg_color, fg=self.fg_color, selectcolor=self.widget_bg,
+                          activebackground=self.bg_color, activeforeground=self.fg_color).pack(side=tk.LEFT, padx=(10, 5))
         
         # Opacity slider
         self.create_slider(main_frame, "Opacity:", self.opacity_var, 30, 100, self.on_setting_changed)
@@ -158,7 +159,7 @@ class ThemeGUI:
         tint_label = tk.Label(main_frame, text="Tint Color:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
         tint_label.pack(anchor="w", pady=(10, 5))
         
-        tint_buttons_frame = ttk.Frame(main_frame)
+        tint_buttons_frame = tk.Frame(main_frame, bg=self.bg_color)
         tint_buttons_frame.pack(fill=tk.X, pady=(0, 10))
         
         tk.Button(tint_buttons_frame, text="Pick Color", command=self.pick_tint_color, 
@@ -177,18 +178,18 @@ class ThemeGUI:
         self.create_slider(main_frame, "Tint Strength:", self.tint_strength_var, 0, 100, self.on_setting_changed)
         
         # Mode toggle
-        mode_frame = ttk.Frame(main_frame)
+        mode_frame = tk.Frame(main_frame, bg=self.bg_color)
         mode_frame.pack(fill=tk.X, pady=(10, 10))
         
         tk.Label(mode_frame, text="Mode:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
         
         tk.Radiobutton(mode_frame, text="Blur (no drag lag)", variable=self.use_acrylic_var, value=False,
                       command=self.on_setting_changed, bg=self.bg_color, fg=self.fg_color, 
-                      selectcolor=self.widget_bg).pack(side=tk.LEFT, padx=(10, 5))
+                      selectcolor=self.widget_bg, activebackground=self.bg_color, activeforeground=self.fg_color).pack(side=tk.LEFT, padx=(10, 5))
         
         tk.Radiobutton(mode_frame, text="Acrylic (lags on drag)", variable=self.use_acrylic_var, value=True,
                       command=self.on_setting_changed, bg=self.bg_color, fg=self.fg_color,
-                      selectcolor=self.widget_bg).pack(side=tk.LEFT)
+                      selectcolor=self.widget_bg, activebackground=self.bg_color, activeforeground=self.fg_color).pack(side=tk.LEFT)
         
         # Window alpha slider
         self.create_slider(main_frame, "Window Alpha (CMD opacity):", self.window_alpha_var, 60, 100, self.on_setting_changed)
@@ -197,19 +198,19 @@ class ThemeGUI:
         autoblur_label = tk.Label(main_frame, text="Autoblur (apply to every new window):", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
         autoblur_label.pack(anchor="w", pady=(10, 5))
         
-        autoblur_frame = ttk.Frame(main_frame)
+        autoblur_frame = tk.Frame(main_frame, bg=self.bg_color)
         autoblur_frame.pack(fill=tk.X, pady=(0, 15))
         
         tk.Checkbutton(autoblur_frame, text="CMD", 
                       variable=self.autoblur_cmd_var, bg=self.bg_color, fg=self.fg_color,
-                      selectcolor=self.widget_bg).pack(side=tk.LEFT, padx=(10, 15))
+                      selectcolor=self.widget_bg, activebackground=self.bg_color, activeforeground=self.fg_color).pack(side=tk.LEFT, padx=(10, 15))
         
         tk.Checkbutton(autoblur_frame, text="PowerShell", 
                       variable=self.autoblur_powershell_var, bg=self.bg_color, fg=self.fg_color,
-                      selectcolor=self.widget_bg).pack(side=tk.LEFT)
+                      selectcolor=self.widget_bg, activebackground=self.bg_color, activeforeground=self.fg_color).pack(side=tk.LEFT)
         
         # Action buttons
-        button_frame = ttk.Frame(main_frame)
+        button_frame = tk.Frame(main_frame, bg=self.bg_color)
         button_frame.pack(fill=tk.X, pady=(0, 10))
         
         tk.Button(button_frame, text="Apply", command=self.apply_theme, 
@@ -230,7 +231,7 @@ class ThemeGUI:
     
     def create_slider(self, parent, label_text, variable, from_, to, command):
         """Helper to create labeled slider."""
-        frame = ttk.Frame(parent)
+        frame = tk.Frame(parent, bg=self.bg_color)
         frame.pack(fill=tk.X, pady=(0, 10))
         
         label = tk.Label(frame, text=label_text, bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
@@ -241,7 +242,8 @@ class ThemeGUI:
         
         slider = tk.Scale(frame, from_=from_, to=to, orient=tk.HORIZONTAL, variable=variable,
                          command=lambda v: command(), bg=self.widget_bg, fg=self.fg_color,
-                         highlightthickness=0, troughcolor=self.button_bg, showvalue=False)
+                         highlightthickness=0, troughcolor=self.button_bg, showvalue=False,
+                         activebackground=self.button_bg)
         slider.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 10))
     
     def on_theme_changed(self):
