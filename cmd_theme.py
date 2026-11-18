@@ -98,46 +98,46 @@ class ThemeGUI:
         """Create all GUI widgets."""
         # Main container
         main_frame = tk.Frame(self.root, bg=self.bg_color)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=12)
         
         # Theme selection
         theme_label = tk.Label(main_frame, text="Theme:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
-        theme_label.pack(anchor="w", pady=(0, 5))
+        theme_label.pack(anchor="w", pady=(0, 4))
         
         theme_frame = tk.Frame(main_frame, bg=self.bg_color)
-        theme_frame.pack(fill=tk.X, pady=(0, 10))
+        theme_frame.pack(fill=tk.X, pady=(0, 8))
         
         self.theme_combo = ttk.Combobox(theme_frame, textvariable=self.selected_theme, 
                                         values=[t.name for t in self.themes], state="readonly", width=50)
         self.theme_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.theme_combo.bind("<<ComboboxSelected>>", lambda e: self.on_theme_changed())
         
-        # Color swatch (traditional 16-color palette) - READ ONLY DISPLAY
+        # Color swatch
         swatch_label = tk.Label(main_frame, text="Theme Color Palette (all 18 colors in this theme):", 
                                bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 9, "italic"))
-        swatch_label.pack(anchor="w", pady=(10, 3))
+        swatch_label.pack(anchor="w", pady=(8, 3))
         
         self.swatch_canvas = tk.Canvas(main_frame, height=30, bg=self.widget_bg, highlightthickness=2, 
                                       highlightbackground="#555555", relief=tk.SUNKEN)
-        self.swatch_canvas.pack(fill=tk.X, pady=(0, 10))
+        self.swatch_canvas.pack(fill=tk.X, pady=(0, 8))
         
-        # Preview box (new in-window preview)
+        # Preview box
         preview_label = tk.Label(main_frame, text="Preview (sample CMD output with theme colors):", 
                                 bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
-        preview_label.pack(anchor="w", pady=(10, 5))
+        preview_label.pack(anchor="w", pady=(8, 4))
         
         self.preview_canvas = tk.Canvas(main_frame, height=120, bg=self.widget_bg, highlightthickness=1, highlightbackground=self.fg_color)
-        self.preview_canvas.pack(fill=tk.X, pady=(0, 5))
+        self.preview_canvas.pack(fill=tk.X, pady=(0, 4))
         
         # Live preview checkbox
         tk.Checkbutton(main_frame, text="Live preview on this window (apply glass effect to GUI)", 
                       variable=self.live_preview_var, command=self.on_live_preview_changed,
                       bg=self.bg_color, fg=self.fg_color,
-                      selectcolor=self.widget_bg, activebackground=self.bg_color, activeforeground=self.fg_color).pack(anchor="w", pady=(0, 15))
+                      selectcolor=self.widget_bg, activebackground=self.bg_color, activeforeground=self.fg_color).pack(anchor="w", pady=(0, 10))
         
         # Apply to selector
         apply_to_frame = tk.Frame(main_frame, bg=self.bg_color)
-        apply_to_frame.pack(fill=tk.X, pady=(0, 10))
+        apply_to_frame.pack(fill=tk.X, pady=(0, 8))
         
         tk.Label(apply_to_frame, text="Apply to:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
         
@@ -162,12 +162,12 @@ class ThemeGUI:
         self.create_slider(main_frame, "Opacity:", self.opacity_var, 30, 100, self.on_setting_changed)
         
         # Tint section
-        tint_label = tk.Label(main_frame, text="Tint Color (optional - click to add color overlay to blur effect):", 
+        tint_label = tk.Label(main_frame, text="Tint Color (optional):", 
                              bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
-        tint_label.pack(anchor="w", pady=(10, 5))
+        tint_label.pack(anchor="w", pady=(8, 4))
         
         tint_buttons_frame = tk.Frame(main_frame, bg=self.bg_color)
-        tint_buttons_frame.pack(fill=tk.X, pady=(0, 10))
+        tint_buttons_frame.pack(fill=tk.X, pady=(0, 8))
         
         tk.Button(tint_buttons_frame, text="Pick Color", command=self.pick_tint_color, 
                  bg=self.button_bg, fg=self.fg_color, relief=tk.FLAT, padx=10, pady=5).pack(side=tk.LEFT, padx=(0, 5))
@@ -186,7 +186,7 @@ class ThemeGUI:
         
         # Mode toggle
         mode_frame = tk.Frame(main_frame, bg=self.bg_color)
-        mode_frame.pack(fill=tk.X, pady=(10, 10))
+        mode_frame.pack(fill=tk.X, pady=(8, 8))
         
         tk.Label(mode_frame, text="Mode:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
         
@@ -201,12 +201,12 @@ class ThemeGUI:
         # Window alpha slider
         self.create_slider(main_frame, "Window Alpha (CMD opacity):", self.window_alpha_var, 60, 100, self.on_setting_changed)
         
-        # Autoblur checkboxes (per-shell)
+        # Autoblur checkboxes
         autoblur_label = tk.Label(main_frame, text="Autoblur (apply to every new window):", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
-        autoblur_label.pack(anchor="w", pady=(10, 5))
+        autoblur_label.pack(anchor="w", pady=(8, 4))
         
         autoblur_frame = tk.Frame(main_frame, bg=self.bg_color)
-        autoblur_frame.pack(fill=tk.X, pady=(0, 15))
+        autoblur_frame.pack(fill=tk.X, pady=(0, 12))
         
         tk.Checkbutton(autoblur_frame, text="CMD", 
                       variable=self.autoblur_cmd_var, bg=self.bg_color, fg=self.fg_color,
@@ -218,28 +218,28 @@ class ThemeGUI:
         
         # Action buttons
         button_frame = tk.Frame(main_frame, bg=self.bg_color)
-        button_frame.pack(fill=tk.X, pady=(0, 10))
+        button_frame.pack(fill=tk.X, pady=(0, 8))
         
         tk.Button(button_frame, text="Apply", command=self.apply_theme, 
-                 bg="#007acc", fg="white", relief=tk.FLAT, padx=20, pady=8, font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=(0, 10))
+                 bg="#007acc", fg="white", relief=tk.FLAT, padx=20, pady=8, font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=(0, 8))
         
         tk.Button(button_frame, text="Restore", command=self.restore_backup,
-                 bg=self.button_bg, fg=self.fg_color, relief=tk.FLAT, padx=15, pady=8).pack(side=tk.LEFT, padx=5)
+                 bg=self.button_bg, fg=self.fg_color, relief=tk.FLAT, padx=15, pady=8).pack(side=tk.LEFT, padx=4)
         
         tk.Button(button_frame, text="Undo", command=self.undo_theme,
-                 bg=self.button_bg, fg=self.fg_color, relief=tk.FLAT, padx=15, pady=8).pack(side=tk.LEFT, padx=5)
+                 bg=self.button_bg, fg=self.fg_color, relief=tk.FLAT, padx=15, pady=8).pack(side=tk.LEFT, padx=4)
         
         tk.Button(button_frame, text="Random", command=self.random_theme,
-                 bg=self.button_bg, fg=self.fg_color, relief=tk.FLAT, padx=15, pady=8).pack(side=tk.LEFT, padx=5)
+                 bg=self.button_bg, fg=self.fg_color, relief=tk.FLAT, padx=15, pady=8).pack(side=tk.LEFT, padx=4)
         
         # Status label
         self.status_label = tk.Label(main_frame, text="Ready", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 9))
-        self.status_label.pack(anchor="w", pady=(10, 0))
+        self.status_label.pack(anchor="w", pady=0)
     
     def create_slider(self, parent, label_text, variable, from_, to, command):
         """Helper to create labeled slider."""
         frame = tk.Frame(parent, bg=self.bg_color)
-        frame.pack(fill=tk.X, pady=(0, 10))
+        frame.pack(fill=tk.X, pady=(0, 8))
         
         label = tk.Label(frame, text=label_text, bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
         label.pack(side=tk.LEFT)
@@ -968,7 +968,7 @@ class WindowsTerminalHandler:
             return
         
         try:
-            backup_dir = Path.home() / 'AppData' / 'Local' / 'cmd-theme-pack' / 'wt-backups'
+            backup_dir = Path.home() / 'AppData' / 'Local' / 'consolor' / 'wt-backups'
             backup_dir.mkdir(parents=True, exist_ok=True)
             
             backup_file = backup_dir / 'settings_backup.json'
@@ -1064,7 +1064,7 @@ class WindowsTerminalHandler:
     
     def restore_backup(self):
         """Restore Windows Terminal settings from backup."""
-        backup_dir = Path.home() / 'AppData' / 'Local' / 'cmd-theme-pack' / 'wt-backups'
+        backup_dir = Path.home() / 'AppData' / 'Local' / 'consolor' / 'wt-backups'
         backup_file = backup_dir / 'settings_backup.json'
         
         if not backup_file.exists():
@@ -1135,7 +1135,7 @@ class GitBashHandler:
     
     def __init__(self):
         self.config_path = Path.home() / '.minttyrc'
-        self.backup_path = Path.home() / 'AppData' / 'Local' / 'cmd-theme-pack' / 'minttyrc_backup.txt'
+        self.backup_path = Path.home() / 'AppData' / 'Local' / 'consolor' / 'minttyrc_backup.txt'
     
     def is_available(self):
         """Check if Git Bash is likely available (has git bash executable)."""
@@ -1282,7 +1282,7 @@ class GitBashHandler:
             return
         
         try:
-            backup_dir = Path.home() / 'AppData' / 'Local' / 'cmd-theme-pack' / 'wt-backups'
+            backup_dir = Path.home() / 'AppData' / 'Local' / 'consolor' / 'wt-backups'
             backup_dir.mkdir(parents=True, exist_ok=True)
             
             backup_file = backup_dir / 'settings_backup.json'
@@ -1378,7 +1378,7 @@ class GitBashHandler:
     
     def restore_backup(self):
         """Restore Windows Terminal settings from backup."""
-        backup_dir = Path.home() / 'AppData' / 'Local' / 'cmd-theme-pack' / 'wt-backups'
+        backup_dir = Path.home() / 'AppData' / 'Local' / 'consolor' / 'wt-backups'
         backup_file = backup_dir / 'settings_backup.json'
         
         if not backup_file.exists():
@@ -1846,8 +1846,8 @@ class RegistryHandler:
         # Check for the blur command in various forms
         script_path = os.path.abspath(__file__)
         return (f'"{script_path}" blur' in autorun or 
-                'cmd_theme.py blur' in autorun or 
-                'cmd_theme blur' in autorun)
+                'consolor.py blur' in autorun or 
+                'consolor blur' in autorun)
     
     def enable_autoblur(self):
         """Enable autoblur - returns True if successful, False if already enabled."""
@@ -2178,7 +2178,7 @@ class BackupManager:
     """Manages backup and restore of console settings."""
     
     def __init__(self):
-        self.backup_dir = Path.home() / 'AppData' / 'Local' / 'cmd-theme-pack'
+        self.backup_dir = Path.home() / 'AppData' / 'Local' / 'consolor'
         self.backup_file = self.backup_dir / 'backup.json'
         self.history_file = self.backup_dir / 'history.json'
         self.settings_file = self.backup_dir / 'settings.json'
@@ -3019,7 +3019,7 @@ def cmd_restore(args):
         print("ERROR: No backup found", file=sys.stderr)
         print(file=sys.stderr)
         print("A backup is created automatically when you first apply a theme.", file=sys.stderr)
-        print("Use 'python cmd_theme.py apply <theme>' to apply a theme.", file=sys.stderr)
+        print("Use 'python consolor.py apply <theme>' to apply a theme.", file=sys.stderr)
         sys.exit(1)
     
     # Get the shell target if specified
@@ -3303,7 +3303,7 @@ def cmd_undo(args):
         print("Nothing to undo.")
         print()
         print("Would you like to restore from backup instead?")
-        print("Use 'python cmd_theme.py restore' to revert to original settings.")
+        print("Use 'python consolor.py restore' to revert to original settings.")
         return
     
     # Get the theme from history
@@ -3436,7 +3436,7 @@ def main():
             sys.exit(1)
     
     parser = argparse.ArgumentParser(
-        prog='cmd_theme.py',
+        prog='consolor',
         description='Consolor - Manage and apply color themes to Windows terminals'
     )
     
