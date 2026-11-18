@@ -1616,32 +1616,6 @@ class RegistryHandler:
         for target_shell in shells_to_apply:
             self._apply_theme_to_shell(theme, opacity, target_shell)
     
-    def _apply_to_current_console(self):
-        """Force the current console window to reload its colors from registry.
-        
-        This is a workaround since Windows consoles don't automatically reload registry settings.
-        We trigger a refresh by sending a console event.
-        """
-        try:
-            # Use SetConsoleTextAttribute to force color reload
-            kernel32 = ctypes.windll.kernel32
-            
-            # Get console output handle
-            STD_OUTPUT_HANDLE = -11
-            handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
-            
-            if handle and handle != -1:
-                # Get current attributes
-                import ctypes.wintypes as wintypes
-                csbi = wintypes.CONSOLE_SCREEN_BUFFER_INFO()
-                if kernel32.GetConsoleScreenBufferInfo(handle, ctypes.byref(csbi)):
-                    # Trigger refresh by setting attributes to current value
-                    kernel32.SetConsoleTextAttribute(handle, csbi.wAttributes)
-                    # Force repaint
-                    kernel32.SetConsoleTextAttribute(handle, csbi.wAttributes)
-        except:
-            pass  # Silently fail - not critical
-    
     
     def _apply_theme_to_shell(self, theme, opacity, shell):
         """Apply theme to a specific shell or global."""
@@ -2474,8 +2448,32 @@ class BackupManager:
                     # Clear blur settings for PowerShell
                     self.clear_blur_settings(shell='powershell')
                     
+                    # Remove blur from current window
+                    try:
+                        blur = BlurHandler()
+                        kernel32 = ctypes.windll.kernel32
+                        console_hwnd = kernel32.GetConsoleWindow()
+                        if console_hwnd:
+                            # Disable blur
+                            accent = blur.ACCENT_POLICY()
+                            accent.AccentState = 0
+                            accent.AccentFlags = 0
+                            accent.GradientColor = 0
+                            accent.AnimationId = 0
+                            
+                            data = blur.WINDOWCOMPOSITIONATTRIBDATA()
+                            data.Attribute = blur.WCA_ACCENT_POLICY
+                            data.Data = ctypes.pointer(accent)
+                            data.SizeOfData = ctypes.sizeof(accent)
+                            
+                            if blur.SetWindowCompositionAttribute:
+                                blur.SetWindowCompositionAttribute(console_hwnd, ctypes.pointer(data))
+                            print("✓ Blur removed from current window")
+                    except:
+                        pass
+                    
                     print()
-                    print("✓ Current window updated (new windows will also use classic blue defaults)")
+                    print("Note: Close and reopen PowerShell to see the classic blue colors.")
                     return
                 
                 # Restore CMD from backup
@@ -2519,38 +2517,37 @@ class BackupManager:
                     # Clear blur settings for this shell
                     self.clear_blur_settings(shell=shell)
                     
-                    # Try to apply restored colors to current window
+                    # Remove blur from current window
+                    blur_removed = False
                     try:
-                        handler._apply_to_current_console()
-                        # Remove blur from current window
-                        try:
-                            blur = BlurHandler()
-                            kernel32 = ctypes.windll.kernel32
-                            console_hwnd = kernel32.GetConsoleWindow()
-                            if console_hwnd:
-                                # Disable blur
-                                accent = blur.ACCENT_POLICY()
-                                accent.AccentState = 0  # ACCENT_DISABLED
-                                accent.AccentFlags = 0
-                                accent.GradientColor = 0
-                                accent.AnimationId = 0
-                                
-                                data = blur.WINDOWCOMPOSITIONATTRIBDATA()
-                                data.Attribute = blur.WCA_ACCENT_POLICY
-                                data.Data = ctypes.pointer(accent)
-                                data.SizeOfData = ctypes.sizeof(accent)
-                                
-                                if blur.SetWindowCompositionAttribute:
-                                    blur.SetWindowCompositionAttribute(console_hwnd, ctypes.pointer(data))
-                        except:
-                            pass
+                        blur = BlurHandler()
+                        kernel32 = ctypes.windll.kernel32
+                        console_hwnd = kernel32.GetConsoleWindow()
+                        if console_hwnd:
+                            # Disable blur
+                            accent = blur.ACCENT_POLICY()
+                            accent.AccentState = 0  # ACCENT_DISABLED
+                            accent.AccentFlags = 0
+                            accent.GradientColor = 0
+                            accent.AnimationId = 0
+                            
+                            data = blur.WINDOWCOMPOSITIONATTRIBDATA()
+                            data.Attribute = blur.WCA_ACCENT_POLICY
+                            data.Data = ctypes.pointer(accent)
+                            data.SizeOfData = ctypes.sizeof(accent)
+                            
+                            if blur.SetWindowCompositionAttribute:
+                                blur.SetWindowCompositionAttribute(console_hwnd, ctypes.pointer(data))
+                                blur_removed = True
                     except:
                         pass
                     
                     shell_name = "CMD"
                     print(f"✓ {shell_name} settings restored successfully!")
+                    if blur_removed:
+                        print("✓ Blur removed from current window")
                     print()
-                    print(f"✓ Current window updated (new windows will also use restored settings)")
+                    print(f"Note: Close and reopen {shell_name} to see the original colors.")
                 else:
                     print(f"No backup found for CMD")
                 
