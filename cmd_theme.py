@@ -138,11 +138,14 @@ class ThemeGUI:
         # Determine available shells
         wt_handler = WindowsTerminalHandler()
         gitbash_handler = GitBashHandler()
+        reg_handler = RegistryHandler()
         shell_options = ["CMD", "PowerShell", "Both"]
         if wt_handler.is_available():
             shell_options.append("Windows Terminal")
         if gitbash_handler.is_available():
             shell_options.append("Git Bash")
+        if reg_handler.is_pwsh_available():
+            shell_options.append("PowerShell 7")
         
         for shell_name in shell_options:
             tk.Radiobutton(apply_to_frame, text=shell_name, variable=self.shell_selector_var, value=shell_name,
@@ -461,12 +464,14 @@ class ThemeGUI:
                     self.status_label.config(text=f"ERROR: {e}", fg="#ff0000")
                     return
             
-            # Legacy console handling (CMD/PowerShell/Both)
+            # Legacy console handling (CMD/PowerShell/Both/PowerShell 7)
             shell_param = None
             if shell_selection == "CMD":
                 shell_param = "cmd"
             elif shell_selection == "PowerShell":
                 shell_param = "powershell"
+            elif shell_selection == "PowerShell 7":
+                shell_param = "pwsh"
             # "Both" = None (applies to global)
             
             # Apply theme to registry
@@ -526,7 +531,7 @@ class ThemeGUI:
             # Save to history
             backup_manager.save_state_before_apply(theme.name, opacity, blur_applied, self.tint_color)
             
-            shell_desc = {"CMD": "CMD", "PowerShell": "PowerShell", "Both": "both shells"}[shell_selection]
+            shell_desc = {"CMD": "CMD", "PowerShell": "PowerShell", "PowerShell 7": "PowerShell 7", "Both": "both shells"}[shell_selection]
             self.status_label.config(text=f"✓ Applied: {theme.name} to {shell_desc}", fg="#00ff00")
             
         except Exception as e:
@@ -573,6 +578,8 @@ class ThemeGUI:
                 shell_param = "cmd"
             elif shell_selection == "PowerShell":
                 shell_param = "powershell"
+            elif shell_selection == "PowerShell 7":
+                shell_param = "pwsh"
             
             backup_manager.restore_backup(shell=shell_param)
             
@@ -586,7 +593,7 @@ class ThemeGUI:
             if not shell_param:
                 handler.disable_autoblur()
             
-            shell_desc = {"CMD": "CMD", "PowerShell": "PowerShell", "Both": "all shells"}[shell_selection]
+            shell_desc = {"CMD": "CMD", "PowerShell": "PowerShell", "PowerShell 7": "PowerShell 7", "Both": "all shells"}[shell_selection]
             self.status_label.config(text=f"✓ Restored {shell_desc} from backup", fg="#00ff00")
         except Exception as e:
             self.status_label.config(text=f"ERROR: {e}", fg="#ff0000")
@@ -1423,6 +1430,13 @@ class RegistryHandler:
     CMD_CONSOLE_KEY = r"Console\%SystemRoot%_system32_cmd.exe"
     POWERSHELL_CONSOLE_KEY = r"Console\%SystemRoot%_System32_WindowsPowerShell_v1.0_powershell.exe"
     
+    # PowerShell 7 paths (will be detected dynamically)
+    PWSH_CONSOLE_KEYS = [
+        r"Console\C:_Program Files_PowerShell_7_pwsh.exe",
+        r"Console\C:_Program Files_PowerShell_6_pwsh.exe",
+        r"Console\C:_Program Files (x86)_PowerShell_7_pwsh.exe",
+    ]
+    
     # PowerShell classic blue defaults
     POWERSHELL_DEFAULTS = {
         'ScreenColors': 0x56,      # Dark blue background, yellow text
@@ -1433,6 +1447,59 @@ class RegistryHandler:
     
     def __init__(self):
         pass
+    
+    def _find_pwsh_console_key(self):
+        """Try to find the PowerShell 7 console registry key."""
+        # Try predefined paths
+        for key_path in self.PWSH_CONSOLE_KEYS:
+            try:
+                key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    key_path,
+                    0,
+                    winreg.KEY_READ
+                )
+                winreg.CloseKey(key)
+                return key_path
+            except:
+                pass
+        
+        # If predefined paths don't work, try to detect from installed pwsh
+        import subprocess
+        try:
+            result = subprocess.run(['pwsh', '-NoProfile', '-Command', 'exit'], 
+                                   capture_output=True, timeout=5)
+            # If pwsh runs, try to find its registry key by listing Console subkeys
+            try:
+                console_key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r"Console",
+                    0,
+                    winreg.KEY_READ
+                )
+                
+                i = 0
+                while True:
+                    try:
+                        subkey_name = winreg.EnumKey(console_key, i)
+                        if 'pwsh.exe' in subkey_name.lower():
+                            winreg.CloseKey(console_key)
+                            return f"Console\\{subkey_name}"
+                        i += 1
+                    except OSError:
+                        break
+                
+                winreg.CloseKey(console_key)
+            except:
+                pass
+        except:
+            pass
+        
+        return None
+    
+    def is_pwsh_available(self):
+        """Check if PowerShell 7 is available on this system."""
+        return self._find_pwsh_console_key() is not None
     
     def apply_powershell_defaults(self):
         """Apply PowerShell classic blue defaults to the PowerShell per-exe key."""
@@ -1488,7 +1555,7 @@ class RegistryHandler:
         """Get the appropriate console registry key path for the shell.
         
         Args:
-            shell: 'cmd', 'powershell', or None (global)
+            shell: 'cmd', 'powershell', 'pwsh', or None (global)
         
         Returns:
             Registry key path string
@@ -1497,6 +1564,11 @@ class RegistryHandler:
             return self.CMD_CONSOLE_KEY
         elif shell == 'powershell':
             return self.POWERSHELL_CONSOLE_KEY
+        elif shell == 'pwsh':
+            pwsh_key = self._find_pwsh_console_key()
+            if pwsh_key:
+                return pwsh_key
+            return None
         else:
             return self.CONSOLE_KEY_PATH
     
@@ -2805,9 +2877,17 @@ def cmd_apply(args):
         elif shell_target == 'powershell':
             shells_to_apply = ['powershell']
             shell_desc = "PowerShell only"
+        elif shell_target == 'pwsh' or shell_target == 'powershell7':
+            # Check if pwsh is available
+            if not handler.is_pwsh_available():
+                print("ERROR: PowerShell 7 not found on this system", file=sys.stderr)
+                print("Install PowerShell 7 or use --for cmd/powershell", file=sys.stderr)
+                sys.exit(1)
+            shells_to_apply = ['pwsh']
+            shell_desc = "PowerShell 7 only"
         else:
             print(f"ERROR: Invalid shell target '{shell_target}'", file=sys.stderr)
-            print("Valid options: cmd, powershell, both, wt (windowsterminal), gitbash (bash)", file=sys.stderr)
+            print("Valid options: cmd, powershell, pwsh, both, wt (windowsterminal), gitbash (bash)", file=sys.stderr)
             sys.exit(1)
         
         # Apply theme to each target shell
