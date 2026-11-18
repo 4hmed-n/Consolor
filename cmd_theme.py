@@ -751,8 +751,66 @@ class RegistryHandler:
     CMD_CONSOLE_KEY = r"Console\%SystemRoot%_system32_cmd.exe"
     POWERSHELL_CONSOLE_KEY = r"Console\%SystemRoot%_System32_WindowsPowerShell_v1.0_powershell.exe"
     
+    # PowerShell classic blue defaults
+    POWERSHELL_DEFAULTS = {
+        'ScreenColors': 0x56,      # Dark blue background, yellow text
+        'PopupColors': 0xf3,       # White background, red text
+        'ColorTable05': 0x562401,  # Magenta -> #012456 (dark blue background)
+        'ColorTable06': 0xf0edee,  # Yellow -> #EEEDF0 (light gray text)
+    }
+    
     def __init__(self):
         pass
+    
+    def apply_powershell_defaults(self):
+        """Apply PowerShell classic blue defaults to the PowerShell per-exe key."""
+        try:
+            key = winreg.CreateKeyEx(
+                winreg.HKEY_CURRENT_USER,
+                self.POWERSHELL_CONSOLE_KEY,
+                0,
+                winreg.KEY_WRITE
+            )
+            
+            try:
+                # Write PowerShell defaults
+                winreg.SetValueEx(key, "ScreenColors", 0, winreg.REG_DWORD, self.POWERSHELL_DEFAULTS['ScreenColors'])
+                winreg.SetValueEx(key, "PopupColors", 0, winreg.REG_DWORD, self.POWERSHELL_DEFAULTS['PopupColors'])
+                winreg.SetValueEx(key, "ColorTable05", 0, winreg.REG_DWORD, self.POWERSHELL_DEFAULTS['ColorTable05'])
+                winreg.SetValueEx(key, "ColorTable06", 0, winreg.REG_DWORD, self.POWERSHELL_DEFAULTS['ColorTable06'])
+            finally:
+                winreg.CloseKey(key)
+            
+            return True
+        except Exception as e:
+            raise Exception(f"Failed to apply PowerShell defaults: {e}")
+    
+    def verify_powershell_defaults(self):
+        """Verify PowerShell key has the correct defaults."""
+        try:
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                self.POWERSHELL_CONSOLE_KEY,
+                0,
+                winreg.KEY_READ
+            )
+            
+            try:
+                screen_colors, _ = winreg.QueryValueEx(key, "ScreenColors")
+                popup_colors, _ = winreg.QueryValueEx(key, "PopupColors")
+                color_table_05, _ = winreg.QueryValueEx(key, "ColorTable05")
+                color_table_06, _ = winreg.QueryValueEx(key, "ColorTable06")
+                
+                return (
+                    screen_colors == self.POWERSHELL_DEFAULTS['ScreenColors'] and
+                    popup_colors == self.POWERSHELL_DEFAULTS['PopupColors'] and
+                    color_table_05 == self.POWERSHELL_DEFAULTS['ColorTable05'] and
+                    color_table_06 == self.POWERSHELL_DEFAULTS['ColorTable06']
+                )
+            finally:
+                winreg.CloseKey(key)
+        except:
+            return False
     
     def get_console_key_path(self, shell=None):
         """Get the appropriate console registry key path for the shell.
@@ -784,8 +842,12 @@ class RegistryHandler:
         elif shell == 'powershell':
             shells_to_apply = ['powershell']
         else:
-            # Both: apply to global key (affects both)
-            shells_to_apply = [None]
+            # Both: protect PowerShell by applying defaults, then apply theme to global + CMD only
+            # First, ensure PowerShell has its classic blue defaults
+            self.apply_powershell_defaults()
+            
+            # Then apply theme to global (affects CMD) and CMD-specific key
+            shells_to_apply = [None, 'cmd']
         
         for target_shell in shells_to_apply:
             self._apply_theme_to_shell(theme, opacity, target_shell)
@@ -1577,7 +1639,24 @@ class BackupManager:
             
             # If restoring specific shell, only restore that shell's settings
             if shell in ['cmd', 'powershell']:
-                # Restore per-shell settings only
+                if shell == 'powershell':
+                    # Always restore PowerShell to classic blue defaults
+                    handler.apply_powershell_defaults()
+                    
+                    # Verify the defaults were applied
+                    if handler.verify_powershell_defaults():
+                        print("✓ PowerShell settings restored to classic blue defaults!")
+                    else:
+                        print("⚠ PowerShell settings written but verification failed")
+                    
+                    # Clear blur settings for PowerShell
+                    self.clear_blur_settings(shell='powershell')
+                    
+                    print()
+                    print("Open a new PowerShell window to see the classic blue defaults.")
+                    return
+                
+                # Restore CMD from backup
                 if 'shells' in backup and shell in backup['shells']:
                     shell_data = backup['shells'][shell]
                     shell_key_path = handler.get_console_key_path(shell)
@@ -1618,13 +1697,12 @@ class BackupManager:
                     # Clear blur settings for this shell
                     self.clear_blur_settings(shell=shell)
                     
-                    shell_name = "CMD" if shell == 'cmd' else "PowerShell"
+                    shell_name = "CMD"
                     print(f"✓ {shell_name} settings restored successfully!")
                     print()
                     print(f"Open a new {shell_name} window to see the original settings.")
                 else:
-                    shell_name = "CMD" if shell == 'cmd' else "PowerShell"
-                    print(f"No backup found for {shell_name}")
+                    print(f"No backup found for CMD")
                 
                 return
             
@@ -1671,6 +1749,10 @@ class BackupManager:
             # Restore per-shell settings
             if 'shells' in backup:
                 for shell_name, shell_data in backup['shells'].items():
+                    # Skip PowerShell - it gets defaults below
+                    if shell_name == 'powershell':
+                        continue
+                    
                     shell_key_path = handler.get_console_key_path(shell_name)
                     
                     try:
@@ -1699,6 +1781,9 @@ class BackupManager:
                             winreg.CloseKey(key)
                     except:
                         pass
+            
+            # Always restore PowerShell to classic blue defaults
+            handler.apply_powershell_defaults()
             
             # Restore global opacity if present
             if 'opacity' in backup:
@@ -2107,6 +2192,11 @@ def cmd_restore(args):
     except Exception as e:
         print(f"ERROR: Failed to restore from backup: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def cmd_reset(args):
+    """Handle reset command - alias for restore."""
+    cmd_restore(args)
 
 
 def cmd_blur(args):
@@ -2542,6 +2632,11 @@ def main():
     parser_restore = subparsers.add_parser('restore', help='Restore console settings from backup')
     parser_restore.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell'], help='Restore only CMD or PowerShell settings (default: restore all)')
     parser_restore.set_defaults(func=cmd_restore)
+    
+    # Reset command (alias for restore)
+    parser_reset = subparsers.add_parser('reset', help='Reset console settings (alias for restore)')
+    parser_reset.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell'], help='Reset only CMD or PowerShell settings (default: reset all)')
+    parser_reset.set_defaults(func=cmd_reset)
     
     # Blur command
     parser_blur = subparsers.add_parser('blur', help='Apply blur to current console window (legacy CMD only)')
