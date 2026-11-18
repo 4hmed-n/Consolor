@@ -80,6 +80,7 @@ class ThemeGUI:
         self.use_acrylic_var = tk.BooleanVar(value=False)
         self.window_alpha_var = tk.IntVar(value=100)
         self.autoblur_var = tk.BooleanVar(value=False)
+        self.clip_edges_var = tk.BooleanVar(value=False)
         
         self.blur_handler = BlurHandler()
         
@@ -156,7 +157,13 @@ class ThemeGUI:
         # Autoblur checkbox
         tk.Checkbutton(main_frame, text="Apply to every new CMD window (autoblur)", 
                       variable=self.autoblur_var, bg=self.bg_color, fg=self.fg_color,
-                      selectcolor=self.widget_bg).pack(anchor="w", pady=(10, 15))
+                      selectcolor=self.widget_bg).pack(anchor="w", pady=(10, 5))
+        
+        # Clip edges checkbox
+        tk.Checkbutton(main_frame, text="Clip edges (prevent tint bleed)", 
+                      variable=self.clip_edges_var, command=self.on_clip_edges_changed,
+                      bg=self.bg_color, fg=self.fg_color,
+                      selectcolor=self.widget_bg).pack(anchor="w", pady=(0, 15))
         
         # Action buttons
         button_frame = tk.Frame(main_frame, bg=self.bg_color)
@@ -202,6 +209,14 @@ class ThemeGUI:
     def on_setting_changed(self):
         """Handle any setting change."""
         self.update_preview()
+    
+    def on_clip_edges_changed(self):
+        """Handle edge clipping toggle."""
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if self.clip_edges_var.get():
+            self.blur_handler.clip_window_edges(hwnd)
+        else:
+            self.blur_handler.remove_window_clip(hwnd)
     
     def draw_color_swatch(self):
         """Draw color swatch for selected theme."""
@@ -409,6 +424,7 @@ def cmd_tune(args):
     print("  [/]        : Tint strength -/+5")
     print("  M          : Toggle blur/acrylic")
     print("  A/D        : Window alpha -/+5 (min 60)")
+    print("  E          : Toggle edge clipping")
     print("  S          : Save (enable autoblur)")
     print("  R          : Reset to solid")
     print("  Q          : Quit and restore")
@@ -435,6 +451,7 @@ def cmd_tune(args):
     tint_strength = 60
     use_acrylic = False
     window_alpha = 100
+    clip_edges = False
     
     # Get console window handle
     kernel32 = ctypes.windll.kernel32
@@ -474,9 +491,10 @@ def cmd_tune(args):
         print(f"Opacity: {opacity}%")
         print(f"Window Alpha: {window_alpha}%")
         print(f"Mode: {'Acrylic' if use_acrylic else 'Blur'}")
+        print(f"Edge Clipping: {'ON' if clip_edges else 'OFF'}")
         print()
         print("Controls: Left/Right=opacity, Up/Down=hue, [/]=strength")
-        print("          W=white, B=black, M=mode, A/D=alpha, S=save, R=reset, Q=quit")
+        print("          W=white, B=black, M=mode, A/D=alpha, E=clip, S=save, R=reset, Q=quit")
     
     # Initial display and apply
     display_state()
@@ -513,6 +531,12 @@ def cmd_tune(args):
                 window_alpha = max(60, window_alpha - 5)
             elif key.lower() == b'd':
                 window_alpha = min(100, window_alpha + 5)
+            elif key.lower() == b'e':
+                clip_edges = not clip_edges
+                if clip_edges:
+                    blur_handler.clip_window_edges(console_hwnd)
+                else:
+                    blur_handler.remove_window_clip(console_hwnd)
             elif key.lower() == b's':
                 # Save settings
                 backup_manager = BackupManager()
@@ -996,6 +1020,7 @@ class BlurHandler:
     ACCENT_ENABLE_TRANSPARENTGRADIENT = 2
     ACCENT_ENABLE_BLURBEHIND = 3
     ACCENT_ENABLE_ACRYLICBLURBEHIND = 4
+    DWMWA_EXTENDED_FRAME_BOUNDS = 9
     
     def __init__(self):
         # Define structures
@@ -1014,12 +1039,22 @@ class BlurHandler:
                 ("SizeOfData", ctypes.c_size_t),
             ]
         
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long),
+                ("top", ctypes.c_long),
+                ("right", ctypes.c_long),
+                ("bottom", ctypes.c_long),
+            ]
+        
         self.ACCENT_POLICY = ACCENT_POLICY
         self.WINDOWCOMPOSITIONATTRIBDATA = WINDOWCOMPOSITIONATTRIBDATA
+        self.RECT = RECT
         
         # Load required DLLs
         self.user32 = ctypes.windll.user32
         self.kernel32 = ctypes.windll.kernel32
+        self.dwmapi = ctypes.windll.dwmapi
         
         # Try to load SetWindowCompositionAttribute
         try:
@@ -1031,6 +1066,29 @@ class BlurHandler:
             self.SetWindowCompositionAttribute.restype = wintypes.BOOL
         except AttributeError:
             self.SetWindowCompositionAttribute = None
+        
+        # Load DWM functions
+        try:
+            self.DwmGetWindowAttribute = self.dwmapi.DwmGetWindowAttribute
+            self.DwmGetWindowAttribute.argtypes = [
+                wintypes.HWND,
+                wintypes.DWORD,
+                ctypes.POINTER(RECT),
+                wintypes.DWORD
+            ]
+            self.DwmGetWindowAttribute.restype = ctypes.c_long
+        except AttributeError:
+            self.DwmGetWindowAttribute = None
+        
+        # SetWindowRgn
+        self.SetWindowRgn = self.user32.SetWindowRgn
+        self.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
+        self.SetWindowRgn.restype = ctypes.c_int
+        
+        # CreateRectRgn
+        self.CreateRectRgn = self.user32.CreateRectRgn
+        self.CreateRectRgn.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+        self.CreateRectRgn.restype = wintypes.HRGN
     
     def parse_tint_color(self, color_input):
         """Parse tint color from hex or color name."""
@@ -1171,6 +1229,56 @@ class BlurHandler:
         """Legacy method for backward compatibility - uses hardcoded dark tint."""
         # Use a default dark grey tint for legacy blur command
         return self.apply_acrylic_blur("#202020", 60, use_acrylic=use_acrylic)
+    
+    def clip_window_edges(self, hwnd):
+        """Clip window to visible frame bounds to prevent edge bleed."""
+        if not self.DwmGetWindowAttribute:
+            return False
+        
+        try:
+            # Get extended frame bounds (actual visible window rect)
+            rect = self.RECT()
+            result = self.DwmGetWindowAttribute(
+                hwnd,
+                self.DWMWA_EXTENDED_FRAME_BOUNDS,
+                ctypes.byref(rect),
+                ctypes.sizeof(rect)
+            )
+            
+            if result != 0:  # S_OK = 0
+                return False
+            
+            # Get window rect to calculate offset
+            window_rect = self.RECT()
+            self.user32.GetWindowRect(hwnd, ctypes.byref(window_rect))
+            
+            # Calculate region in window coordinates
+            left = rect.left - window_rect.left
+            top = rect.top - window_rect.top
+            right = rect.right - window_rect.left
+            bottom = rect.bottom - window_rect.top
+            
+            # Create rectangular region
+            hrgn = self.CreateRectRgn(left, top, right, bottom)
+            
+            if not hrgn:
+                return False
+            
+            # Apply region
+            self.SetWindowRgn(hwnd, hrgn, True)
+            
+            return True
+            
+        except Exception as e:
+            return False
+    
+    def remove_window_clip(self, hwnd):
+        """Remove window clipping."""
+        try:
+            self.SetWindowRgn(hwnd, 0, True)  # NULL region = no clipping
+            return True
+        except:
+            return False
 
 
 class BackupManager:
