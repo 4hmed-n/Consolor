@@ -392,6 +392,167 @@ def cmd_gui(args):
     gui.run()
 
 
+def cmd_tune(args):
+    """Handle tune command - interactive live tuning."""
+    if not MSVCRT_AVAILABLE:
+        print("ERROR: tune command not available (msvcrt not found)", file=sys.stderr)
+        sys.exit(1)
+    
+    print("CMD Theme Pack - Live Tune Mode")
+    print("=" * 50)
+    print()
+    print("Controls:")
+    print("  Left/Right : Opacity -/+5")
+    print("  Up/Down    : Rotate tint hue")
+    print("  W          : White tint")
+    print("  B          : Black tint")
+    print("  [/]        : Tint strength -/+5")
+    print("  M          : Toggle blur/acrylic")
+    print("  A/D        : Window alpha -/+5 (min 60)")
+    print("  S          : Save (enable autoblur)")
+    print("  R          : Reset to solid")
+    print("  Q          : Quit and restore")
+    print()
+    print("Press any key to start...")
+    msvcrt.getch()
+    
+    # Store original state
+    handler = RegistryHandler()
+    original_opacity = handler.get_opacity() or 100
+    
+    # Initialize state
+    loader = ThemeLoader()
+    themes = loader.list_themes()
+    if not themes:
+        print("ERROR: No themes available", file=sys.stderr)
+        sys.exit(1)
+    
+    current_theme = themes[0]
+    opacity = 70
+    tint_hue = 0.0  # 0.0 to 1.0
+    tint_saturation = 1.0
+    tint_value = 1.0
+    tint_strength = 60
+    use_acrylic = False
+    window_alpha = 100
+    
+    # Get console window handle
+    kernel32 = ctypes.windll.kernel32
+    console_hwnd = kernel32.GetConsoleWindow()
+    
+    if not console_hwnd:
+        print("ERROR: Could not get console window handle", file=sys.stderr)
+        sys.exit(1)
+    
+    blur_handler = BlurHandler()
+    
+    def get_tint_hex():
+        """Convert HSV to hex color."""
+        r, g, b = colorsys.hsv_to_rgb(tint_hue, tint_saturation, tint_value)
+        return f"#{int(r*255):02X}{int(g*255):02X}{int(b*255):02X}"
+    
+    def apply_current_settings():
+        """Apply current settings to console."""
+        try:
+            tint_hex = get_tint_hex()
+            blur_handler.apply_blur_to_window(console_hwnd, tint_hex, tint_strength, use_acrylic)
+            
+            # Also set window alpha
+            handler.set_opacity(window_alpha)
+        except Exception as e:
+            pass  # Silently fail during tuning
+    
+    def display_state():
+        """Display current state."""
+        os.system('cls' if os.name == 'nt' else 'clear')
+        print("CMD Theme Pack - Live Tune Mode")
+        print("=" * 50)
+        print()
+        print(f"Theme: {current_theme.name}")
+        print(f"Tint: {get_tint_hex()}")
+        print(f"Tint Strength: {tint_strength}%")
+        print(f"Opacity: {opacity}%")
+        print(f"Window Alpha: {window_alpha}%")
+        print(f"Mode: {'Acrylic' if use_acrylic else 'Blur'}")
+        print()
+        print("Controls: Left/Right=opacity, Up/Down=hue, [/]=strength")
+        print("          W=white, B=black, M=mode, A/D=alpha, S=save, R=reset, Q=quit")
+    
+    # Initial display and apply
+    display_state()
+    apply_current_settings()
+    
+    # Main loop
+    running = True
+    while running:
+        if msvcrt.kbhit():
+            key = msvcrt.getch()
+            
+            # Handle arrow keys and special keys
+            if key == b'\xe0' or key == b'\x00':  # Arrow key prefix
+                key = msvcrt.getch()
+                if key == b'K':  # Left arrow
+                    opacity = max(30, opacity - 5)
+                elif key == b'M':  # Right arrow
+                    opacity = min(100, opacity + 5)
+                elif key == b'H':  # Up arrow
+                    tint_hue = (tint_hue + 0.05) % 1.0
+                elif key == b'P':  # Down arrow
+                    tint_hue = (tint_hue - 0.05) % 1.0
+            elif key == b'[':
+                tint_strength = max(0, tint_strength - 5)
+            elif key == b']':
+                tint_strength = min(100, tint_strength + 5)
+            elif key.lower() == b'w':
+                tint_hue, tint_saturation, tint_value = 0.0, 0.0, 1.0
+            elif key.lower() == b'b':
+                tint_hue, tint_saturation, tint_value = 0.0, 0.0, 0.0
+            elif key.lower() == b'm':
+                use_acrylic = not use_acrylic
+            elif key.lower() == b'a':
+                window_alpha = max(60, window_alpha - 5)
+            elif key.lower() == b'd':
+                window_alpha = min(100, window_alpha + 5)
+            elif key.lower() == b's':
+                # Save settings
+                backup_manager = BackupManager()
+                tint_hex = get_tint_hex()
+                backup_manager.save_blur_settings(
+                    tint=tint_hex,
+                    opacity=tint_strength,
+                    theme_background=current_theme.colors['background'],
+                    use_acrylic=use_acrylic
+                )
+                handler.enable_autoblur()
+                handler.set_opacity(window_alpha)
+                display_state()
+                print("\n✓ Settings saved! Autoblur enabled.")
+                time.sleep(1)
+            elif key.lower() == b'r':
+                # Reset to solid
+                opacity = 100
+                tint_strength = 0
+                window_alpha = 100
+                handler.set_opacity(100)
+                # Don't apply blur when reset
+                display_state()
+                print("\n✓ Reset to solid")
+                time.sleep(1)
+            elif key.lower() == b'q':
+                # Quit and restore
+                handler.set_opacity(original_opacity)
+                running = False
+                print("\n✓ Restored original settings")
+                break
+            else:
+                continue
+            
+            display_state()
+            apply_current_settings()
+    
+    print("\nExited tune mode.")
+
+
 def resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller."""
     try:
@@ -1872,6 +2033,10 @@ def main():
     # GUI command
     parser_gui = subparsers.add_parser('gui', help='Open graphical user interface')
     parser_gui.set_defaults(func=cmd_gui)
+    
+    # Tune command
+    parser_tune = subparsers.add_parser('tune', help='Interactive live tuning mode')
+    parser_tune.set_defaults(func=cmd_tune)
     
     # List command
     parser_list = subparsers.add_parser('list', help='List all available themes')
