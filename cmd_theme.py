@@ -115,6 +115,7 @@ class ThemeGUI:
         # Color swatch (traditional 16-color palette)
         self.swatch_canvas = tk.Canvas(main_frame, height=30, bg=self.widget_bg, highlightthickness=0)
         self.swatch_canvas.pack(fill=tk.X, pady=(0, 10))
+        self.swatch_canvas.bind('<Configure>', lambda e: self.draw_color_swatch())
         
         # Preview box (new in-window preview)
         preview_label = tk.Label(main_frame, text="Preview:", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 10, "bold"))
@@ -122,6 +123,7 @@ class ThemeGUI:
         
         self.preview_canvas = tk.Canvas(main_frame, height=120, bg=self.widget_bg, highlightthickness=1, highlightbackground=self.fg_color)
         self.preview_canvas.pack(fill=tk.X, pady=(0, 5))
+        self.preview_canvas.bind('<Configure>', lambda e: self.draw_preview_box())
         
         # Live preview checkbox
         tk.Checkbutton(main_frame, text="Live preview on this window (apply glass effect to GUI)", 
@@ -300,6 +302,8 @@ class ThemeGUI:
             theme.colors['bright_blue'], theme.colors['bright_magenta'], theme.colors['bright_cyan'], theme.colors['bright_white']
         ]
         
+        # Force canvas to update its size
+        self.swatch_canvas.update_idletasks()
         canvas_width = self.swatch_canvas.winfo_width()
         if canvas_width <= 1:
             canvas_width = 670  # Default width
@@ -319,6 +323,8 @@ class ThemeGUI:
         
         self.preview_canvas.delete("all")
         
+        # Force canvas to update its size
+        self.preview_canvas.update_idletasks()
         canvas_width = self.preview_canvas.winfo_width()
         canvas_height = self.preview_canvas.winfo_height()
         if canvas_width <= 1:
