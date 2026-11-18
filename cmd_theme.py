@@ -1560,8 +1560,12 @@ class BackupManager:
         except Exception as e:
             raise Exception(f"Failed to create backup: {e}")
     
-    def restore_backup(self):
-        """Restore console settings from backup."""
+    def restore_backup(self, shell=None):
+        """Restore console settings from backup.
+        
+        Args:
+            shell: 'cmd', 'powershell', or None (restore all)
+        """
         if not self.backup_exists():
             raise Exception("No backup found")
         
@@ -1571,6 +1575,60 @@ class BackupManager:
             
             handler = RegistryHandler()
             
+            # If restoring specific shell, only restore that shell's settings
+            if shell in ['cmd', 'powershell']:
+                # Restore per-shell settings only
+                if 'shells' in backup and shell in backup['shells']:
+                    shell_data = backup['shells'][shell]
+                    shell_key_path = handler.get_console_key_path(shell)
+                    
+                    try:
+                        key = winreg.CreateKeyEx(
+                            winreg.HKEY_CURRENT_USER,
+                            shell_key_path,
+                            0,
+                            winreg.KEY_WRITE
+                        )
+                        
+                        try:
+                            # Restore colors if present
+                            if 'colors' in shell_data:
+                                colors = shell_data['colors']
+                                for i, color in enumerate(colors['color_table']):
+                                    key_name = f"ColorTable{i:02d}"
+                                    winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, color)
+                                
+                                winreg.SetValueEx(key, "ScreenColors", 0, winreg.REG_DWORD, colors['screen_colors'])
+                            
+                            # Restore opacity if present
+                            if 'opacity' in shell_data:
+                                window_alpha = handler._opacity_to_window_alpha(shell_data['opacity'])
+                                winreg.SetValueEx(key, "WindowAlpha", 0, winreg.REG_DWORD, window_alpha)
+                            else:
+                                # Remove WindowAlpha if it wasn't in backup
+                                try:
+                                    winreg.DeleteValue(key, "WindowAlpha")
+                                except FileNotFoundError:
+                                    pass
+                        finally:
+                            winreg.CloseKey(key)
+                    except Exception as e:
+                        raise Exception(f"Failed to restore {shell} settings: {e}")
+                    
+                    # Clear blur settings for this shell
+                    self.clear_blur_settings(shell=shell)
+                    
+                    shell_name = "CMD" if shell == 'cmd' else "PowerShell"
+                    print(f"✓ {shell_name} settings restored successfully!")
+                    print()
+                    print(f"Open a new {shell_name} window to see the original settings.")
+                else:
+                    shell_name = "CMD" if shell == 'cmd' else "PowerShell"
+                    print(f"No backup found for {shell_name}")
+                
+                return
+            
+            # Restore all (original behavior when shell=None)
             # Restore global colors if present
             if 'global_colors' in backup:
                 colors = backup['global_colors']
@@ -1612,8 +1670,8 @@ class BackupManager:
             
             # Restore per-shell settings
             if 'shells' in backup:
-                for shell, shell_data in backup['shells'].items():
-                    shell_key_path = handler.get_console_key_path(shell)
+                for shell_name, shell_data in backup['shells'].items():
+                    shell_key_path = handler.get_console_key_path(shell_name)
                     
                     try:
                         key = winreg.CreateKeyEx(
@@ -1678,6 +1736,9 @@ class BackupManager:
                         opacity=wt_settings.get('opacity'),
                         blur=wt_settings.get('useAcrylic', False)
                     )
+            
+            # Clear all blur settings
+            self.clear_blur_settings(shell=None)
             
             print("✓ Settings restored successfully!")
             print()
@@ -2037,10 +2098,12 @@ def cmd_restore(args):
         print("Use 'python cmd_theme.py apply <theme>' to apply a theme.", file=sys.stderr)
         sys.exit(1)
     
+    # Get the shell target if specified
+    shell_target = getattr(args, 'for_shell', None)
+    
     try:
-        backup_manager.restore_backup()
-        # Clear saved blur settings on restore
-        backup_manager.clear_blur_settings()
+        backup_manager.restore_backup(shell=shell_target)
+        # Clear blur settings handled inside restore_backup
     except Exception as e:
         print(f"ERROR: Failed to restore from backup: {e}", file=sys.stderr)
         sys.exit(1)
@@ -2292,6 +2355,9 @@ def cmd_undo(args):
     backup_manager = BackupManager()
     loader = ThemeLoader()
     
+    # Get the shell target if specified
+    shell_target = getattr(args, 'for_shell', None)
+    
     # Get the state to restore (second-to-last, before current)
     state_to_restore = backup_manager.get_state_to_restore()
     
@@ -2318,7 +2384,11 @@ def cmd_undo(args):
             print(f"ERROR: Theme '{theme_name}' not found", file=sys.stderr)
             sys.exit(1)
         
-        print(f"Undoing to: {theme.name}")
+        shell_desc = "CMD" if shell_target == 'cmd' else ("PowerShell" if shell_target == 'powershell' else "")
+        if shell_desc:
+            print(f"Undoing {shell_desc} to: {theme.name}")
+        else:
+            print(f"Undoing to: {theme.name}")
     
     # Detect console type
     wt_handler = WindowsTerminalHandler()
@@ -2327,6 +2397,9 @@ def cmd_undo(args):
     
     if is_windows_terminal:
         # Windows Terminal mode
+        if shell_target:
+            print(f"Note: --for {shell_target} flag ignored (Windows Terminal uses global settings)")
+        
         try:
             if opacity is not None or blur:
                 wt_handler.apply_opacity_blur(opacity=opacity, blur=blur)
@@ -2346,21 +2419,29 @@ def cmd_undo(args):
     else:
         # Legacy Console mode
         try:
-            if theme_name:
-                theme = loader.get_theme(theme_name)
-                if theme:
-                    handler.apply_theme(theme, opacity=opacity)
-                    print(f"✓ Reverted to theme '{theme.name}'")
-                else:
-                    # Theme not found, just restore opacity
-                    if opacity is not None:
-                        handler.set_opacity(opacity)
-                        print(f"✓ Reverted opacity to {opacity}%")
+            # Determine which shell(s) to apply to
+            shells_to_apply = []
+            if shell_target == 'cmd':
+                shells_to_apply = ['cmd']
+                shell_desc = "CMD"
+            elif shell_target == 'powershell':
+                shells_to_apply = ['powershell']
+                shell_desc = "PowerShell"
             else:
-                # No theme, just opacity
+                # Apply to global (both)
+                shells_to_apply = [None]
+                shell_desc = "both shells"
+            
+            if theme_name and theme:
+                for target_shell in shells_to_apply:
+                    handler.apply_theme(theme, opacity=opacity, shell=target_shell)
+                print(f"✓ Reverted {shell_desc} to theme '{theme.name}'")
+            else:
+                # No theme, just restore opacity
                 if opacity is not None:
-                    handler.set_opacity(opacity)
-                    print(f"✓ Reverted opacity to {opacity}%")
+                    for target_shell in shells_to_apply:
+                        handler.set_opacity(opacity, shell=target_shell)
+                    print(f"✓ Reverted {shell_desc} opacity to {opacity}%")
             
             if opacity and theme_name:
                 print(f"  Opacity: {opacity}% (persistent)")
@@ -2376,7 +2457,8 @@ def cmd_undo(args):
                         
                         # Set minimum opacity of 60% in WindowAlpha for glass to show through
                         if opacity and opacity < 60:
-                            handler.set_opacity(60)
+                            for target_shell in shells_to_apply:
+                                handler.set_opacity(60, shell=target_shell)
                         
                         blur_handler.apply_acrylic_blur(blur_tint, blur_opacity)
                         
@@ -2389,7 +2471,12 @@ def cmd_undo(args):
                     print(f"  Blur: Failed to apply - {e}", file=sys.stderr)
             
             print()
-            print("Open a new Command Prompt window to see the changes.")
+            if shell_target == 'cmd':
+                print("Open a new Command Prompt (CMD) window to see the changes.")
+            elif shell_target == 'powershell':
+                print("Open a new PowerShell window to see the changes.")
+            else:
+                print("Open a new Command Prompt window to see the changes.")
         except Exception as e:
             print(f"ERROR: Failed to revert: {e}", file=sys.stderr)
             sys.exit(1)
@@ -2453,6 +2540,7 @@ def main():
     
     # Restore command
     parser_restore = subparsers.add_parser('restore', help='Restore console settings from backup')
+    parser_restore.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell'], help='Restore only CMD or PowerShell settings (default: restore all)')
     parser_restore.set_defaults(func=cmd_restore)
     
     # Blur command
@@ -2472,6 +2560,7 @@ def main():
     
     # Undo command
     parser_undo = subparsers.add_parser('undo', help='Revert to previously applied theme')
+    parser_undo.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell'], help='Undo only CMD or PowerShell settings (default: undo all)')
     parser_undo.set_defaults(func=cmd_undo)
     
     args = parser.parse_args()
