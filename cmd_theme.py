@@ -112,8 +112,12 @@ class ThemeGUI:
         self.theme_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.theme_combo.bind("<<ComboboxSelected>>", lambda e: self.on_theme_changed())
         
+        # Color palette display (informational only)
+        palette_label = tk.Label(main_frame, text="Theme Color Palette (Preview Only):", bg=self.bg_color, fg=self.fg_color, font=("Segoe UI", 9, "italic"))
+        palette_label.pack(anchor="w", pady=(10, 3))
+        
         # Color swatch (traditional 16-color palette)
-        self.swatch_canvas = tk.Canvas(main_frame, height=30, bg=self.widget_bg, highlightthickness=0)
+        self.swatch_canvas = tk.Canvas(main_frame, height=30, bg=self.widget_bg, highlightthickness=1, highlightbackground="#555555", relief=tk.SUNKEN)
         self.swatch_canvas.pack(fill=tk.X, pady=(0, 10))
         self.swatch_canvas.bind('<Configure>', lambda e: self.draw_color_swatch())
         
