@@ -2449,6 +2449,7 @@ class BackupManager:
                     self.clear_blur_settings(shell='powershell')
                     
                     # Remove blur from current window
+                    blur_removed = False
                     try:
                         blur = BlurHandler()
                         kernel32 = ctypes.windll.kernel32
@@ -2468,12 +2469,16 @@ class BackupManager:
                             
                             if blur.SetWindowCompositionAttribute:
                                 blur.SetWindowCompositionAttribute(console_hwnd, ctypes.pointer(data))
-                            print("✓ Blur removed from current window")
+                                blur_removed = True
                     except:
                         pass
                     
+                    if blur_removed:
+                        print("✓ Blur removed from current window")
+                    # Force console to use new colors on next output
+                    print(" ", end="\r")
                     print()
-                    print("Note: Close and reopen PowerShell to see the classic blue colors.")
+                    print("Note: New text will use the restored colors. Close and reopen for full reset.")
                     return
                 
                 # Restore CMD from backup
@@ -2547,7 +2552,9 @@ class BackupManager:
                     if blur_removed:
                         print("✓ Blur removed from current window")
                     print()
-                    print(f"Note: Close and reopen {shell_name} to see the original colors.")
+                    # Force console to repaint with new colors by printing a space and clearing it
+                    print(" ", end="\r")
+                    print(f"Note: New text will use the restored colors. Close and reopen for full reset.")
                 else:
                     print(f"No backup found for CMD")
                 
