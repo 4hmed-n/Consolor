@@ -6,7 +6,7 @@ PowerShell, Windows Terminal, and Git Bash.
 Uses only Python standard library (winreg, json, argparse, ctypes).
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 import winreg
 import json
