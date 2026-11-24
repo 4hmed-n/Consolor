@@ -6,7 +6,7 @@ Apply color themes to Windows Command Prompt, PowerShell, Windows Terminal, and 
 
 **Option 1: Executable (Windows)**
 
-Download `consolor.exe` from [Releases](https://github.com/yourusername/consolor/releases).
+Download `consolor.exe` from [Releases](https://github.com/4hmed-n/Consolor/releases).
 
 **Option 2: Python Script**
 
@@ -59,7 +59,7 @@ consolor preview <theme>   # Shows colors as colored blocks
 ### Apply Theme
 
 ```bash
-consolor apply <theme>                         # Apply to both CMD and PowerShell
+consolor apply <theme>                         # Apply to CMD only (default for legacy console)
 consolor apply <theme> --for cmd               # Apply to CMD only
 consolor apply <theme> --for powershell        # Apply to PowerShell only
 consolor apply <theme> --for pwsh              # Apply to PowerShell 7 only

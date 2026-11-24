@@ -39,9 +39,8 @@ except ImportError:
 def hide_console_window():
     """Hide the console window (for GUI mode)."""
     try:
-        kernel32 = ctypes.windll.kernel32
         user32 = ctypes.windll.user32
-        hwnd = kernel32.GetConsoleWindow()
+        hwnd = get_console_hwnd()
         if hwnd:
             user32.ShowWindow(hwnd, 0)  # SW_HIDE
     except:
@@ -51,6 +50,14 @@ def hide_console_window():
 def running_in_windows_terminal():
     """Check if we're running inside Windows Terminal."""
     return bool(os.environ.get('WT_SESSION'))
+
+
+def get_console_hwnd():
+    """Get console window handle with proper restype to avoid truncation on 64-bit."""
+    kernel32 = ctypes.windll.kernel32
+    get_console_window = kernel32.GetConsoleWindow
+    get_console_window.restype = wintypes.HWND
+    return get_console_window()
 
 
 class ThemeGUI:
@@ -528,8 +535,7 @@ class ThemeGUI:
                         )
                     
                     # Apply to current console window
-                    kernel32 = ctypes.windll.kernel32
-                    console_hwnd = kernel32.GetConsoleWindow()
+                    console_hwnd = get_console_hwnd()
                     if console_hwnd:
                         self.blur_handler.apply_blur_to_window(console_hwnd, blur_tint, blur_opacity, use_acrylic)
                         # Automatically clip edges to prevent tint bleed
@@ -713,8 +719,7 @@ def cmd_tune(args):
     clip_edges = False
     
     # Get console window handle
-    kernel32 = ctypes.windll.kernel32
-    console_hwnd = kernel32.GetConsoleWindow()
+    console_hwnd = get_console_hwnd()
     
     if not console_hwnd:
         print("ERROR: Could not get console window handle", file=sys.stderr)
@@ -1947,7 +1952,7 @@ class BlurHandler:
             raise Exception("SetWindowCompositionAttribute not available on this system")
         
         # Get console window handle
-        hwnd = self.kernel32.GetConsoleWindow()
+        hwnd = get_console_hwnd()
         if not hwnd:
             raise Exception("Could not get console window handle")
         
