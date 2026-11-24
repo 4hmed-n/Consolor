@@ -1731,7 +1731,8 @@ class RegistryHandler:
     def set_autorun(self, value):
         """Set AutoRun value in registry."""
         try:
-            key = winreg.OpenKey(
+            # Use CreateKeyEx to create the key if it doesn't exist
+            key = winreg.CreateKeyEx(
                 winreg.HKEY_CURRENT_USER,
                 self.AUTORUN_KEY_PATH,
                 0,
