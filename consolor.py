@@ -2889,7 +2889,37 @@ def cmd_apply(args):
     elif shell_target == 'powershell7':
         shell_target = 'pwsh'
     
+    # Parse tint color if specified (needed for all branches)
+    tint_color = None
+    if args.tint:
+        try:
+            blur_handler = BlurHandler()
+            tint_color = blur_handler.parse_tint_color(args.tint)
+        except ValueError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Handle --glass preset
+    opacity = args.opacity
+    blur = args.blur
+    use_acrylic = args.acrylic if hasattr(args, 'acrylic') else False
+    
+    if args.glass:
+        # Glass preset: enable blur and set opacity to 70 if not explicitly specified
+        blur = True
+        if opacity is None:
+            opacity = 70
+    
+    # --tint implies --blur
+    if tint_color:
+        blur = True
+    
+    # Create backup manager early (needed for all branches)
+    backup_manager = BackupManager()
+    
     # Check if Windows Terminal is explicitly requested
+    is_legacy_target = shell_target in ('cmd', 'powershell', 'pwsh', 'both')
+    
     if shell_target == 'wt':
         wt_handler = WindowsTerminalHandler()
         if not wt_handler.is_available():
@@ -2961,49 +2991,22 @@ def cmd_apply(args):
         
         return
     
-    # Parse tint color if specified
-    tint_color = None
-    if args.tint:
-        try:
-            blur_handler = BlurHandler()
-            tint_color = blur_handler.parse_tint_color(args.tint)
-        except ValueError as e:
-            print(f"ERROR: {e}", file=sys.stderr)
-            sys.exit(1)
-    
-    # Handle --glass preset
-    opacity = args.opacity
-    blur = args.blur
-    use_acrylic = args.acrylic if hasattr(args, 'acrylic') else False
-    
-    if args.glass:
-        # Glass preset: enable blur and set opacity to 70 if not explicitly specified
-        blur = True
-        if opacity is None:
-            opacity = 70
-    
-    # --tint implies --blur
-    if tint_color:
-        blur = True
-    
-    # Create backup manager early (needed for clearing settings)
-    backup_manager = BackupManager()
-    
-    # Determine if we should reset effects or keep them
-    user_specified_effects = args.opacity is not None or args.blur or args.glass or args.tint or use_acrylic
-    keep_effects = args.keep_effects
-    
-    if not user_specified_effects and not keep_effects:
-        # Reset to solid (100% opacity, no blur, no tint)
-        opacity = 100
-        blur = False
-        tint_color = None
-        # Clear saved blur settings for the target shell(s)
-        if shell_target == 'both':
-            backup_manager.clear_blur_settings(shell='cmd')
-            backup_manager.clear_blur_settings(shell='powershell')
-        else:
-            backup_manager.clear_blur_settings(shell=shell_target)
+    # Determine if we should reset effects or keep them (only for legacy targets)
+    if is_legacy_target:
+        user_specified_effects = args.opacity is not None or args.blur or args.glass or args.tint or use_acrylic
+        keep_effects = args.keep_effects
+        
+        if not user_specified_effects and not keep_effects:
+            # Reset to solid (100% opacity, no blur, no tint)
+            opacity = 100
+            blur = False
+            tint_color = None
+            # Clear saved blur settings for the target shell(s)
+            if shell_target == 'both':
+                backup_manager.clear_blur_settings(shell='cmd')
+                backup_manager.clear_blur_settings(shell='powershell')
+            else:
+                backup_manager.clear_blur_settings(shell=shell_target)
     
     # Create backup if it doesn't exist
     if not backup_manager.backup_exists():
