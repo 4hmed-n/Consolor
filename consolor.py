@@ -2881,8 +2881,16 @@ def cmd_apply(args):
     # Get the shell target
     shell_target = getattr(args, 'for_shell', 'both')
     
+    # Normalize shell target aliases
+    if shell_target == 'windowsterminal':
+        shell_target = 'wt'
+    elif shell_target in ('git-bash', 'bash'):
+        shell_target = 'gitbash'
+    elif shell_target == 'powershell7':
+        shell_target = 'pwsh'
+    
     # Check if Windows Terminal is explicitly requested
-    if shell_target == 'wt' or shell_target == 'windowsterminal':
+    if shell_target == 'wt':
         wt_handler = WindowsTerminalHandler()
         if not wt_handler.is_available():
             print("ERROR: Windows Terminal not found", file=sys.stderr)
@@ -2920,7 +2928,7 @@ def cmd_apply(args):
         return
     
     # Check if Git Bash is explicitly requested
-    if shell_target == 'gitbash' or shell_target == 'git-bash' or shell_target == 'bash':
+    if shell_target == 'gitbash':
         gitbash_handler = GitBashHandler()
         if not gitbash_handler.is_available():
             print("ERROR: Git Bash not found", file=sys.stderr)
@@ -3664,18 +3672,18 @@ def main():
     parser_apply.add_argument('--tint', metavar='COLOR', help='Custom tint color (hex #RRGGBB or name: red, blue, green, purple, pink, orange, cyan, yellow, teal, white, black). Implies --blur.')
     parser_apply.add_argument('--acrylic', action='store_true', help='Use acrylic blur (state 4) instead of regular blur. WARNING: Causes drag lag on Windows 10.')
     parser_apply.add_argument('--keep-effects', action='store_true', help='Keep current opacity and blur settings')
-    parser_apply.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell', 'both'], default='both', help='Apply to CMD, PowerShell, or both (default: both). Only applies to legacy console.')
+    parser_apply.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell', 'pwsh', 'both', 'wt', 'gitbash'], default='both', help='Apply to CMD, PowerShell, PowerShell 7 (pwsh), Windows Terminal (wt), Git Bash (gitbash), or both legacy consoles (default: both).')
     parser_apply.set_defaults(func=cmd_apply)
     
     # Restore command
     parser_restore = subparsers.add_parser('restore', help='Restore console settings from backup')
-    parser_restore.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell'], help='Restore only CMD or PowerShell settings (default: restore all)')
+    parser_restore.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell', 'pwsh', 'wt', 'gitbash'], help='Restore only CMD, PowerShell, PowerShell 7, Windows Terminal, or Git Bash settings (default: restore all)')
     parser_restore.add_argument('--defaults', action='store_true', help='Restore Windows built-in defaults by deleting global color values (CMD only)')
     parser_restore.set_defaults(func=cmd_restore)
     
     # Reset command (alias for restore)
     parser_reset = subparsers.add_parser('reset', help='Reset console settings (alias for restore)')
-    parser_reset.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell'], help='Reset only CMD or PowerShell settings (default: reset all)')
+    parser_reset.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell', 'pwsh', 'wt', 'gitbash'], help='Reset only CMD, PowerShell, PowerShell 7, Windows Terminal, or Git Bash settings (default: reset all)')
     parser_reset.set_defaults(func=cmd_reset)
     
     # Blur command
@@ -3690,7 +3698,7 @@ def main():
     
     # Status command
     parser_status = subparsers.add_parser('status', help='Show current theme, opacity, blur and autoblur state')
-    parser_status.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell', 'both'], help='Show status for specific shell (default: both)')
+    parser_status.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell', 'pwsh', 'both', 'wt', 'gitbash'], help='Show status for specific shell (default: both)')
     parser_status.set_defaults(func=cmd_status)
     
     # Snapshot command
@@ -3700,7 +3708,7 @@ def main():
     
     # Undo command
     parser_undo = subparsers.add_parser('undo', help='Revert to previously applied theme')
-    parser_undo.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell'], help='Undo only CMD or PowerShell settings (default: undo all)')
+    parser_undo.add_argument('--for', dest='for_shell', choices=['cmd', 'powershell', 'pwsh', 'wt', 'gitbash'], help='Undo only CMD, PowerShell, PowerShell 7, Windows Terminal, or Git Bash settings (default: undo all)')
     parser_undo.set_defaults(func=cmd_undo)
     
     args = parser.parse_args()
