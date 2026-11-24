@@ -1808,11 +1808,16 @@ class RegistryHandler:
         
         for segment in segments:
             segment = segment.strip()
-            # Skip blur-related segments (including old temp paths)
+            # Skip blur-related segments (including old temp paths) and empty segments
             if segment and not ('blur' in segment and ('consolor' in segment or '_MEI' in segment or sys.executable in segment)):
                 new_segments.append(segment)
         
+        # Join segments and clean up any double ampersands
         new_autorun = ' & '.join(new_segments) if new_segments else None
+        if new_autorun:
+            # Clean up any double ampersands that might have been created
+            while ' &  & ' in new_autorun:
+                new_autorun = new_autorun.replace(' &  & ', ' & ')
         
         if new_autorun != current_autorun:
             self.set_autorun(new_autorun)
