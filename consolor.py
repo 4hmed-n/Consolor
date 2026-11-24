@@ -1751,24 +1751,28 @@ class RegistryHandler:
         except Exception as e:
             raise Exception(f"Failed to set AutoRun: {e}")
     
+    def _blur_command(self):
+        """Generate the blur command for AutoRun, handling both script and frozen exe."""
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller exe
+            return f'"{sys.executable}" blur'
+        else:
+            # Running as script
+            script_path = os.path.abspath(__file__)
+            return f'python "{script_path}" blur'
+    
     def is_autoblur_enabled(self):
         """Check if autoblur is enabled in AutoRun."""
         autorun = self.get_autorun()
         if not autorun:
             return False
-        # Check for the blur command in various forms
-        script_path = os.path.abspath(__file__)
-        return (f'"{script_path}" blur' in autorun or 
-                'consolor.py blur' in autorun or 
-                'consolor blur' in autorun)
+        # Check for the blur command in various forms (including old temp paths)
+        return 'blur' in autorun and ('consolor' in autorun or '_MEI' in autorun or sys.executable in autorun)
     
     def enable_autoblur(self):
         """Enable autoblur - returns True if successful, False if already enabled."""
         current_autorun = self.get_autorun()
-        
-        # Get the path to this script
-        script_path = os.path.abspath(__file__)
-        blur_command = f'python "{script_path}" blur'
+        blur_command = self._blur_command()
         
         # Check if already enabled
         if current_autorun and blur_command in current_autorun:
@@ -1790,25 +1794,25 @@ class RegistryHandler:
         if not current_autorun:
             return False  # Not enabled
         
-        # Get the path to this script
-        script_path = os.path.abspath(__file__)
-        blur_command = f'python "{script_path}" blur'
+        blur_command = self._blur_command()
         
-        # Remove blur command from AutoRun
-        if blur_command not in current_autorun:
-            return False  # Not enabled
+        # Work segment-wise to preserve unrelated AutoRun commands and clean old entries
+        segments = current_autorun.split('&')
+        new_segments = []
         
-        # Remove the blur command
-        new_autorun = current_autorun.replace(blur_command, '').strip()
-        # Clean up any leftover & separators
-        new_autorun = new_autorun.replace('& &', '&').strip('& ').strip()
+        for segment in segments:
+            segment = segment.strip()
+            # Skip blur-related segments (including old temp paths)
+            if segment and not ('blur' in segment and ('consolor' in segment or '_MEI' in segment or sys.executable in segment)):
+                new_segments.append(segment)
         
-        if new_autorun:
+        new_autorun = ' & '.join(new_segments) if new_segments else None
+        
+        if new_autorun != current_autorun:
             self.set_autorun(new_autorun)
-        else:
-            self.set_autorun(None)
+            return True
         
-        return True
+        return False
 
 
 class BlurHandler:
