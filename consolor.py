@@ -48,6 +48,11 @@ def hide_console_window():
         pass
 
 
+def running_in_windows_terminal():
+    """Check if we're running inside Windows Terminal."""
+    return bool(os.environ.get('WT_SESSION'))
+
+
 class ThemeGUI:
     """GUI for theme management."""
     
@@ -456,7 +461,7 @@ class ThemeGUI:
                     wt_handler.apply_theme(theme, opacity=wt_opacity, use_acrylic=use_acrylic)
                     
                     self.status_label.config(text=f"✓ Applied: {theme.name} to Windows Terminal", fg="#00ff00")
-                    backup_manager.save_state_before_apply(theme.name, opacity, use_acrylic, self.tint_color)
+                    backup_manager.save_state_before_apply(theme.name, opacity, use_acrylic, self.tint_color, shell='wt')
                     return
                 except Exception as e:
                     self.status_label.config(text=f"ERROR: {e}", fg="#ff0000")
@@ -473,7 +478,7 @@ class ThemeGUI:
                     gitbash_handler.apply_theme(theme)
                     
                     self.status_label.config(text=f"✓ Applied: {theme.name} to Git Bash", fg="#00ff00")
-                    backup_manager.save_state_before_apply(theme.name, opacity, False, self.tint_color)
+                    backup_manager.save_state_before_apply(theme.name, opacity, False, self.tint_color, shell='gitbash')
                     return
                 except Exception as e:
                     self.status_label.config(text=f"ERROR: {e}", fg="#ff0000")
@@ -549,7 +554,7 @@ class ThemeGUI:
                     backup_manager.clear_blur_settings(shell='powershell')
             
             # Save to history
-            backup_manager.save_state_before_apply(theme.name, opacity, blur_applied, self.tint_color)
+            backup_manager.save_state_before_apply(theme.name, opacity, blur_applied, self.tint_color, shell=shell_param or 'both')
             
             shell_desc = {"CMD": "CMD", "PowerShell": "PowerShell", "PowerShell 7": "PowerShell 7", "Both": "both shells"}[shell_selection]
             self.status_label.config(text=f"✓ Applied: {theme.name} to {shell_desc}", fg="#00ff00")
@@ -2372,7 +2377,7 @@ class BackupManager:
         except:
             pass
     
-    def save_state_before_apply(self, theme_name, opacity=None, blur=False, tint=None):
+    def save_state_before_apply(self, theme_name, opacity=None, blur=False, tint=None, shell=None):
         """Save the state we're ABOUT TO APPLY (so undo can revert to it)."""
         try:
             # Load existing history
@@ -2388,6 +2393,7 @@ class BackupManager:
                 'opacity': opacity,
                 'blur': blur,
                 'tint': tint,
+                'shell': shell,  # Track which terminal was targeted
                 'timestamp': time.time()
             }
             history.append(entry)
@@ -3057,7 +3063,7 @@ def cmd_apply(args):
             print("Restart Windows Terminal or open a new tab to see the changes.")
             
             # Save to history
-            backup_manager.save_state_before_apply(theme.name, opacity, use_acrylic, tint_color)
+            backup_manager.save_state_before_apply(theme.name, opacity, use_acrylic, tint_color, shell='wt')
         except Exception as e:
             print(f"ERROR: Failed to apply theme to Windows Terminal: {e}", file=sys.stderr)
             sys.exit(1)
@@ -3091,7 +3097,7 @@ def cmd_apply(args):
             print("Note: Opacity and blur effects are not supported in mintty.")
             
             # Save to history
-            backup_manager.save_state_before_apply(theme.name, None, False, None)
+            backup_manager.save_state_before_apply(theme.name, None, False, None, shell='gitbash')
         except Exception as e:
             print(f"ERROR: Failed to apply theme to Git Bash: {e}", file=sys.stderr)
             sys.exit(1)
@@ -3240,7 +3246,7 @@ def cmd_apply(args):
             print("Open a new Command Prompt window to see the changes.")
         
         # Save to history AFTER successful apply
-        backup_manager.save_state_before_apply(theme.name, opacity, blur, tint_color)
+        backup_manager.save_state_before_apply(theme.name, opacity, blur, tint_color, shell=shell_target)
     except PermissionError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         print(file=sys.stderr)
@@ -3265,15 +3271,44 @@ def cmd_restore(args):
         backup_manager.restore_defaults()
         return
     
+    # Get the shell target if specified
+    shell_target = getattr(args, 'for_shell', None)
+    
+    # Windows Terminal restore
+    if shell_target == 'wt':
+        wt_handler = WindowsTerminalHandler()
+        if wt_handler.is_available():
+            if wt_handler.restore_backup():
+                print("✓ Restored Windows Terminal settings from backup")
+            else:
+                print("ERROR: No Windows Terminal backup found", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print("ERROR: Windows Terminal not found", file=sys.stderr)
+            sys.exit(1)
+        return
+    
+    # Git Bash restore
+    if shell_target == 'gitbash':
+        gitbash_handler = GitBashHandler()
+        if gitbash_handler.is_available():
+            if gitbash_handler.restore_backup():
+                print("✓ Restored Git Bash settings from backup")
+            else:
+                print("ERROR: No Git Bash backup found", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print("ERROR: Git Bash not found", file=sys.stderr)
+            sys.exit(1)
+        return
+    
+    # Legacy console restore
     if not backup_manager.backup_exists():
         print("ERROR: No backup found", file=sys.stderr)
         print(file=sys.stderr)
         print("A backup is created automatically when you first apply a theme.", file=sys.stderr)
         print("Use 'python consolor.py apply <theme>' to apply a theme.", file=sys.stderr)
         sys.exit(1)
-    
-    # Get the shell target if specified
-    shell_target = getattr(args, 'for_shell', None)
     
     try:
         backup_manager.restore_backup(shell=shell_target)
@@ -3291,6 +3326,10 @@ def cmd_reset(args):
 def cmd_blur(args):
     """Handle blur command - apply blur to current console window."""
     try:
+        # Silent no-op if running inside Windows Terminal
+        if running_in_windows_terminal():
+            return
+        
         # Autoblur should be silent - don't print messages
         is_interactive = sys.stdout.isatty()
         
@@ -3431,8 +3470,8 @@ def cmd_status(args):
     except:
         pass
     
-    # Check console type
-    if wt_handler.is_available():
+    # Check console type - use running_in_windows_terminal() not is_available()
+    if running_in_windows_terminal():
         print("Console Type: Windows Terminal")
         print()
         
@@ -3602,9 +3641,6 @@ def cmd_undo(args):
     backup_manager = BackupManager()
     loader = ThemeLoader()
     
-    # Get the shell target if specified
-    shell_target = getattr(args, 'for_shell', None)
-    
     # Get the state to restore (second-to-last, before current)
     state_to_restore = backup_manager.get_state_to_restore()
     
@@ -3614,6 +3650,9 @@ def cmd_undo(args):
         print("Would you like to restore from backup instead?")
         print("Use 'python consolor.py restore' to revert to original settings.")
         return
+    
+    # Resolve the shell target: use --for argument if provided, otherwise use the shell from history
+    undo_target = getattr(args, 'for_shell', None) or state_to_restore.get('shell', 'both')
     
     # Get the theme from history
     theme_name = state_to_restore.get('theme')
@@ -3631,22 +3670,18 @@ def cmd_undo(args):
             print(f"ERROR: Theme '{theme_name}' not found", file=sys.stderr)
             sys.exit(1)
         
-        shell_desc = "CMD" if shell_target == 'cmd' else ("PowerShell" if shell_target == 'powershell' else "")
+        shell_desc = "CMD" if undo_target == 'cmd' else ("PowerShell" if undo_target == 'powershell' else "")
         if shell_desc:
             print(f"Undoing {shell_desc} to: {theme.name}")
         else:
             print(f"Undoing to: {theme.name}")
     
-    # Detect console type
+    # Use the undo_target to determine which terminal to modify
     wt_handler = WindowsTerminalHandler()
     handler = RegistryHandler()
-    is_windows_terminal = wt_handler.is_available()
     
-    if is_windows_terminal:
+    if undo_target == 'wt':
         # Windows Terminal mode
-        if shell_target:
-            print(f"Note: --for {shell_target} flag ignored (Windows Terminal uses global settings)")
-        
         try:
             if opacity is not None or blur:
                 wt_handler.apply_opacity_blur(opacity=opacity, blur=blur)
@@ -3663,17 +3698,35 @@ def cmd_undo(args):
         except Exception as e:
             print(f"ERROR: Failed to revert: {e}", file=sys.stderr)
             sys.exit(1)
+    elif undo_target == 'gitbash':
+        # Git Bash mode
+        gitbash_handler = GitBashHandler()
+        if theme_name and theme:
+            try:
+                gitbash_handler.apply_theme(theme)
+                print(f"✓ Reverted Git Bash to theme '{theme.name}'")
+                print()
+                print("Restart Git Bash to see the changes.")
+            except Exception as e:
+                print(f"ERROR: Failed to revert: {e}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print("ERROR: Cannot undo Git Bash without theme information", file=sys.stderr)
+            sys.exit(1)
     else:
-        # Legacy Console mode
+        # Legacy Console mode (cmd, powershell, pwsh, both)
         try:
             # Determine which shell(s) to apply to
             shells_to_apply = []
-            if shell_target == 'cmd':
+            if undo_target == 'cmd':
                 shells_to_apply = ['cmd']
                 shell_desc = "CMD"
-            elif shell_target == 'powershell':
+            elif undo_target == 'powershell':
                 shells_to_apply = ['powershell']
                 shell_desc = "PowerShell"
+            elif undo_target == 'pwsh':
+                shells_to_apply = ['pwsh']
+                shell_desc = "PowerShell 7"
             else:
                 # Apply to global (both)
                 shells_to_apply = [None]
@@ -3718,10 +3771,12 @@ def cmd_undo(args):
                     print(f"  Blur: Failed to apply - {e}", file=sys.stderr)
             
             print()
-            if shell_target == 'cmd':
+            if undo_target == 'cmd':
                 print("Open a new Command Prompt (CMD) window to see the changes.")
-            elif shell_target == 'powershell':
+            elif undo_target == 'powershell':
                 print("Open a new PowerShell window to see the changes.")
+            elif undo_target == 'pwsh':
+                print("Open a new PowerShell 7 window to see the changes.")
             else:
                 print("Open a new Command Prompt window to see the changes.")
         except Exception as e:
