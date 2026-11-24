@@ -933,6 +933,105 @@ class WindowsTerminalHandler:
     def __init__(self):
         self.settings_path = self._find_settings_path()
         self.backup_manager = None
+        self.stripped_comments = False  # Track if we stripped comments for warning
+    
+    def _strip_jsonc(self, content):
+        """
+        Strip JSONC comments and trailing commas to make it valid JSON.
+        Handles // comments, /* */ comments, and trailing commas while preserving
+        strings that may contain // (like URLs).
+        """
+        result = []
+        in_string = False
+        in_single_line_comment = False
+        in_multi_line_comment = False
+        escape_next = False
+        i = 0
+        
+        while i < len(content):
+            char = content[i]
+            
+            # Handle escape sequences in strings
+            if escape_next:
+                result.append(char)
+                escape_next = False
+                i += 1
+                continue
+            
+            # Check for escape character in strings
+            if in_string and char == '\\':
+                result.append(char)
+                escape_next = True
+                i += 1
+                continue
+            
+            # Toggle string state on unescaped quotes
+            if char == '"' and not in_single_line_comment and not in_multi_line_comment:
+                in_string = not in_string
+                result.append(char)
+                i += 1
+                continue
+            
+            # Skip characters if we're in a comment
+            if in_single_line_comment:
+                if char == '\n':
+                    in_single_line_comment = False
+                    result.append(char)
+                i += 1
+                continue
+            
+            if in_multi_line_comment:
+                if char == '*' and i + 1 < len(content) and content[i + 1] == '/':
+                    in_multi_line_comment = False
+                    self.stripped_comments = True
+                    i += 2
+                    continue
+                i += 1
+                continue
+            
+            # Detect comment starts (only outside strings)
+            if not in_string:
+                if char == '/' and i + 1 < len(content):
+                    next_char = content[i + 1]
+                    if next_char == '/':
+                        in_single_line_comment = True
+                        self.stripped_comments = True
+                        i += 2
+                        continue
+                    elif next_char == '*':
+                        in_multi_line_comment = True
+                        self.stripped_comments = True
+                        i += 2
+                        continue
+            
+            # Handle trailing commas (only outside strings)
+            if not in_string and char == ',':
+                # Look ahead to see if this is a trailing comma
+                j = i + 1
+                while j < len(content) and content[j] in ' \t\n\r':
+                    j += 1
+                if j < len(content) and content[j] in '}]':
+                    # This is a trailing comma, skip it
+                    i += 1
+                    continue
+            
+            result.append(char)
+            i += 1
+        
+        return ''.join(result)
+    
+    def _load_settings(self):
+        """Load and parse Windows Terminal settings, handling JSONC format."""
+        with open(self.settings_path, 'r', encoding='utf-8-sig') as f:
+            content = f.read()
+        
+        # Try loading as strict JSON first
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # If that fails, strip JSONC comments and try again
+            stripped = self._strip_jsonc(content)
+            return json.loads(stripped)
     
     def _find_settings_path(self):
         """Find Windows Terminal settings.json path in multiple locations."""
@@ -992,15 +1091,18 @@ class WindowsTerminalHandler:
             # Backup before modification
             self._backup_settings()
             
-            with open(self.settings_path, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
+            settings = self._load_settings()
             
-            # Ensure schemes array exists
-            if 'schemes' not in settings:
+            # Remove old Consolor schemes
+            if 'schemes' in settings:
+                settings['schemes'] = [s for s in settings['schemes'] 
+                                     if not (s.get('name', '').startswith('CMDThemePack_') or 
+                                           s.get('name', '').startswith('Consolor_'))]
+            else:
                 settings['schemes'] = []
             
-            # Create color scheme from theme
-            scheme_name = f"CMDThemePack_{theme.name}"
+            # Create color scheme from theme with new naming
+            scheme_name = f"Consolor_{theme.name}"
             color_scheme = {
                 "name": scheme_name,
                 "background": theme.colors['background'],
@@ -1022,9 +1124,6 @@ class WindowsTerminalHandler:
                 "brightCyan": theme.colors['bright_cyan'],
                 "brightWhite": theme.colors['bright_white'],
             }
-            
-            # Remove existing scheme with same name if it exists
-            settings['schemes'] = [s for s in settings['schemes'] if s.get('name') != scheme_name]
             
             # Add new scheme
             settings['schemes'].append(color_scheme)
@@ -1050,9 +1149,19 @@ class WindowsTerminalHandler:
                 if 'useAcrylic' in settings['profiles']['defaults']:
                     del settings['profiles']['defaults']['useAcrylic']
             
-            # Write back
+            # Write back with header comment
             with open(self.settings_path, 'w', encoding='utf-8') as f:
+                # Add header comment pointing to backup
+                f.write('// Modified by Consolor - backup saved at: ')
+                backup_dir = Path.home() / 'AppData' / 'Local' / 'consolor' / 'wt-backups'
+                f.write(str(backup_dir / 'settings_backup.json'))
+                f.write('\n')
                 json.dump(settings, f, indent=4)
+            
+            # Warn if we had to strip comments
+            if self.stripped_comments:
+                print("⚠ Warning: JSONC comments were detected and removed from settings.json")
+                print(f"  Original backed up to: {backup_dir / 'settings_backup.json'}")
             
             return True
         except Exception as e:
@@ -1082,8 +1191,7 @@ class WindowsTerminalHandler:
             # Backup before modification
             self._backup_settings()
             
-            with open(self.settings_path, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
+            settings = self._load_settings()
             
             # Ensure profiles.defaults exists
             if 'profiles' not in settings:
@@ -1113,8 +1221,7 @@ class WindowsTerminalHandler:
             return None
         
         try:
-            with open(self.settings_path, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
+            settings = self._load_settings()
             
             defaults = settings.get('profiles', {}).get('defaults', {})
             return {
