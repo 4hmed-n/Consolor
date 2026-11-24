@@ -1570,14 +1570,14 @@ class RegistryHandler:
     def _write_color_table(self, key, colors):
         """Write color table to registry."""
         color_mapping = [
-            ("ColorTable00", colors['black']),
+            ("ColorTable00", colors['background']),  # Slot 0 = background (used by ScreenColors 0x07)
             ("ColorTable01", colors['blue']),
             ("ColorTable02", colors['green']),
             ("ColorTable03", colors['cyan']),
             ("ColorTable04", colors['red']),
             ("ColorTable05", colors['magenta']),
             ("ColorTable06", colors['yellow']),
-            ("ColorTable07", colors['white']),
+            ("ColorTable07", colors['foreground']),  # Slot 7 = foreground (used by ScreenColors 0x07)
             ("ColorTable08", colors['bright_black']),
             ("ColorTable09", colors['bright_blue']),
             ("ColorTable10", colors['bright_green']),
@@ -2196,7 +2196,8 @@ class BackupManager:
     
     def check_snapshot_matches_theme(self):
         """Check if original snapshot colors match any known theme.
-        Returns (matches, theme_name) tuple."""
+        Returns (matches, theme_name) tuple.
+        Updated to accept both old mapping (slot 0=black) and new mapping (slot 0=background)."""
         if not self.original_snapshot_exists():
             return (False, None)
         
@@ -2207,24 +2208,25 @@ class BackupManager:
             if not snapshot.get('global_colors'):
                 return (False, None)
             
-            # Get snapshot ColorTable00 (black color)
-            snapshot_black = snapshot['global_colors']['color_table'][0]
+            # Get snapshot ColorTable00
+            snapshot_slot0 = snapshot['global_colors']['color_table'][0]
             
             # Load all themes and check for matches
             loader = ThemeLoader()
             themes = loader.list_themes()
             
             for theme in themes:
-                # Convert theme's black color to COLORREF format
-                black_hex = theme.colors['black'].lstrip('#')
-                r = int(black_hex[0:2], 16)
-                g = int(black_hex[2:4], 16)
-                b = int(black_hex[4:6], 16)
-                theme_black = (b << 16) | (g << 8) | r
-                
-                # Check if it matches
-                if theme_black == snapshot_black:
-                    return (True, theme.name)
+                # Try both old mapping (slot 0 = black) and new mapping (slot 0 = background)
+                for color_key in ['black', 'background']:
+                    color_hex = theme.colors[color_key].lstrip('#')
+                    r = int(color_hex[0:2], 16)
+                    g = int(color_hex[2:4], 16)
+                    b = int(color_hex[4:6], 16)
+                    theme_colorref = (b << 16) | (g << 8) | r
+                    
+                    # Check if it matches
+                    if theme_colorref == snapshot_slot0:
+                        return (True, theme.name)
             
             return (False, None)
         except:
